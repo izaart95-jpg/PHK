@@ -1,4 +1,4 @@
-name: Rustdesk with Sunshine
+name: SSHX Remote Access with Sunshine
 
 on:
   workflow_dispatch:
@@ -6,6 +6,7 @@ on:
 env:
   SSHX_SESSION_FILE: /tmp/sshx_session.log
   SSHX_PID: 0
+  SUNSHINE_PID: 0
 
 jobs:
   setup-sshx:
@@ -17,7 +18,7 @@ jobs:
         run: |
           echo "=== Installing basic dependencies ==="
           sudo apt-get update
-          sudo apt-get install -y curl wget
+          sudo apt-get install -y curl wget gdebi-core
           echo "✅ Dependencies installed"
 
       - name: Install sshx and show URL
@@ -68,9 +69,15 @@ jobs:
           sudo apt-get install -y \
             ubuntu-desktop \
             tigervnc-standalone-server \
-            dbus-x11
+            dbus-x11 \
+            mesa-utils \
+            vainfo
             
           echo "✅ Ubuntu Desktop and VNC installed"
+          
+          # Check VA-API support
+          echo "=== Checking VA-API support ==="
+          vainfo || echo "VA-API not available"
 
       - name: Install Tailscale
         run: |
@@ -102,30 +109,84 @@ jobs:
           echo "Downloading Sunshine from: $SUNSHINE_URL"
           wget -O "$SUNSHINE_DEB" "$SUNSHINE_URL"
           
-          echo "Installing Sunshine..."
-          sudo apt install -y "./$SUNSHINE_DEB"
-          
-          # Install dependencies that Sunshine might need
-          sudo apt install -y libboost-thread1.74.0 libboost-log1.74.0 libboost-config1.74.0 \
-            libboost-filesystem1.74.0 libboost-chrono1.74.0 libboost-atomic1.74.0 \
-            libavcodec60 libavformat60 libavutil58 libswscale7 libswresample4 \
-            libopus0 libnuma1 libmfx1 libva-drm2 libva-x11-2 libva2
+          # Install dependencies first
+          echo "Installing Sunshine dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y \
+            libboost-thread1.74.0 \
+            libboost-log1.74.0 \
+            libboost-filesystem1.74.0 \
+            libboost-chrono1.74.0 \
+            libboost-atomic1.74.0 \
+            libavcodec60 \
+            libavformat60 \
+            libavutil58 \
+            libswscale7 \
+            libswresample4 \
+            libopus0 \
+            libnuma1 \
+            libmfx1 \
+            libva-drm2 \
+            libva-x11-2 \
+            libva2 \
+            libssl3 \
+            libpulse0 \
+            libx264-164 \
+            libx265-199 \
+            libvpx9 \
+            libdrm2 \
+            libwayland-client0 \
+            libxkbcommon0
+            
+          # Install Sunshine using gdebi to handle dependencies better
+          echo "Installing Sunshine package..."
+          sudo gdebi -n "$SUNSHINE_DEB"
           
           echo "✅ Sunshine installed"
           
+          # Create Sunshine configuration directory and basic config
+          echo "Creating Sunshine configuration..."
+          mkdir -p ~/.config/sunshine
+          
+          # Create minimal config file
+          cat > ~/.config/sunshine/sunshine.conf << 'EOF'
+{
+  "global": {
+    "prep-cmd": [],
+    "origin_web_ui_allowed": "host"
+  },
+  "creds": {
+    "username": "sunshine",
+    "password": "sunshine",
+    "salt": "sunshine"
+  }
+}
+EOF
+          
           echo "=== Starting Sunshine ==="
           # Start Sunshine in background
-          sunshine &
+          /usr/bin/sunshine-2025.924.154138 &
           SUNSHINE_PID=$!
           echo "Sunshine PID: $SUNSHINE_PID"
           echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
           
           # Wait for Sunshine to start
-          sleep 5
+          sleep 10
           
           echo "Sunshine should now be running on:"
           echo "  - Web interface: http://localhost:47990"
           echo "  - Streaming port: 47989"
+          echo "  - Default credentials: sunshine / sunshine"
+          
+          # Check if Sunshine is running
+          if ps -p $SUNSHINE_PID > /dev/null 2>&1; then
+            echo "✅ Sunshine is running successfully"
+          else
+            echo "⚠️ Sunshine failed to start, checking logs..."
+            # Try to start with verbose output
+            /usr/bin/sunshine-2025.924.154138 --verbose &
+            sleep 5
+          fi
 
       - name: Keep SSHX alive for 6 hours
         run: |
@@ -161,6 +222,18 @@ jobs:
           echo "🌞 Default credentials:"
           echo "    Username: sunshine"
           echo "    Password: sunshine"
+          echo "🌞 Connect via Tailscale: http://<tailscale-ip>:47990"
+          echo ""
+          
+          # Display connection instructions
+          echo "=== Connection Instructions ==="
+          echo "1. Connect via SSHX URL above"
+          echo "2. Once connected, you can access:"
+          echo "   - Sunshine Web UI: http://localhost:47990"
+          echo "   - Ubuntu Desktop: (via VNC or Sunshine stream)"
+          echo "3. To connect from outside via Tailscale:"
+          echo "   - Install Tailscale on your device"
+          echo "   - Use the Tailscale IP shown above"
           echo ""
           
           # Keep alive for 6 hours (360 minutes)
@@ -206,8 +279,9 @@ jobs:
               fi
               
               # Check Sunshine
-              if ps -p $SUNSHINE_PID > /dev/null 2>&1; then
-                echo "✅ Sunshine: Running (PID: $SUNSHINE_PID)"
+              SUNSHINE_PROCESS=$(pgrep -f "sunshine" || echo "")
+              if [ ! -z "$SUNSHINE_PROCESS" ]; then
+                echo "✅ Sunshine: Running (PID: $SUNSHINE_PROCESS)"
                 echo "   Web Interface: http://localhost:47990"
                 echo "   Streaming: port 47989"
               else
@@ -216,7 +290,7 @@ jobs:
                 pkill -f "sunshine" 2>/dev/null || true
                 sleep 2
                 # Restart Sunshine
-                sunshine &
+                /usr/bin/sunshine-2025.924.154138 &
                 SUNSHINE_PID=$!
                 echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
                 sleep 5
