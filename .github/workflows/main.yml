@@ -91,37 +91,12 @@ jobs:
           echo "=== Tailscale Status ==="
           sudo tailscale status || true
 
-      - name: Install Sunshine
-        run: |
-          echo "=== Installing Sunshine ==="
-          
-          # Download Sunshine
-          SUNSHINE_URL="https://github.com/LizardByte/Sunshine/releases/download/v2025.924.154138/sunshine-ubuntu-24.04-amd64.deb"
-          SUNSHINE_DEB="sunshine.deb"
-          
-          echo "Downloading Sunshine from: $SUNSHINE_URL"
-          wget -O "$SUNSHINE_DEB" "$SUNSHINE_URL"
-          
-          echo "Installing Sunshine..."
-          sudo apt install -y "./$SUNSHINE_DEB"
-          
+     
    
           
-          echo "✅ Sunshine installed"
+    
           
-          echo "=== Starting Sunshine ==="
-          # Start Sunshine in background
-          sunshine &
-          SUNSHINE_PID=$!
-          echo "Sunshine PID: $SUNSHINE_PID"
-          echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
-          
-          # Wait for Sunshine to start
-          sleep 5
-          
-          echo "Sunshine should now be running on:"
-          echo "  - Web interface: http://localhost:47990"
-          echo "  - Streaming port: 47989"
+    
 
       - name: Keep SSHX alive for 6 hours
         run: |
@@ -201,23 +176,7 @@ jobs:
                 sudo tailscale up --auth-key "tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf" --reset || true
               fi
               
-              # Check Sunshine
-              if ps -p $SUNSHINE_PID > /dev/null 2>&1; then
-                echo "✅ Sunshine: Running (PID: $SUNSHINE_PID)"
-                echo "   Web Interface: http://localhost:47990"
-                echo "   Streaming: port 47989"
-              else
-                echo "⚠️ Sunshine: Not running, attempting restart..."
-                # Kill any remaining sunshine processes
-                pkill -f "sunshine" 2>/dev/null || true
-                sleep 2
-                # Restart Sunshine
-                sunshine &
-                SUNSHINE_PID=$!
-                echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
-                sleep 5
-              fi
-            fi
+         
             
             # Wait for next minute
             if [ $minute -lt $TOTAL_MINUTES ]; then
