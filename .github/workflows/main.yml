@@ -1,4 +1,4 @@
-name: Rustdesk with Sunshine + VNC
+name: Rustdesk with Sunshine + VNC + GNOME
 
 on:
   workflow_dispatch:
@@ -16,18 +16,25 @@ jobs:
     steps:
 
       ######################################################################
-      # 1️⃣ Install dependencies
+      # 1️⃣ REQUIREMENTS + FIXES
       ######################################################################
-      - name: Install dependencies
+      - name: Install Desktop + Tools
         run: |
           sudo apt update
-          sudo apt install -y curl wget x11vnc \
-            ubuntu-desktop dbus-x11 \
+          sudo apt install -y \
+            ubuntu-desktop dbus-x11 x11vnc \
             xserver-xorg-core xserver-xorg-video-dummy \
-            xinit
+            xinit curl wget
+
+          # Disable GNOME session crash protection
+          sudo mkdir -p /etc/systemd/system/user@.service.d
+          sudo tee /etc/systemd/system/user@.service.d/override.conf >/dev/null << 'EOF'
+          [Service]
+          Delegate=yes
+          EOF
 
       ######################################################################
-      # 2️⃣ Start SSHX
+      # 2️⃣ START SSHX
       ######################################################################
       - name: Start SSHX
         run: |
@@ -38,12 +45,12 @@ jobs:
           grep -o "https://sshx.io/[a-zA-Z0-9-]*" "$SSHX_SESSION_FILE" | head -1
 
       ######################################################################
-      # 3️⃣ Create Dummy Display for Xorg
+      # 3️⃣ DUMMY GPU CONFIG FOR XORG
       ######################################################################
-      - name: Create dummy Xorg monitor
+      - name: Dummy Xorg Monitor
         run: |
           sudo mkdir -p /etc/X11/xorg.conf.d
-          sudo tee /etc/X11/xorg.conf.d/10-headless-monitor.conf >/dev/null << 'EOF'
+          sudo tee /etc/X11/xorg.conf.d/10-dummy.conf >/dev/null << 'EOF'
           Section "Device"
             Identifier "DummyDevice"
             Driver "dummy"
@@ -63,76 +70,77 @@ jobs:
             Device "DummyDevice"
             Monitor "DummyMonitor"
             SubSection "Display"
-                Depth 24
-                Modes "1920x1080"
+              Depth 24
+              Modes "1920x1080"
             EndSubSection
           EndSection
           EOF
 
       ######################################################################
-      # 4️⃣ Launch REAL Xorg + GNOME session
+      # 4️⃣ START REAL XORG DISPLAY AND GNOME
       ######################################################################
       - name: Start Xorg + GNOME
         run: |
           sudo mkdir -p $XDG_RUNTIME_DIR
           sudo chmod 700 $XDG_RUNTIME_DIR
 
-          echo "Starting Xorg (dummy display)..."
+          echo "Starting Xorg on :0"
           sudo Xorg :0 -noreset -nolisten tcp &
-          sleep 6
+          sleep 5
 
-          echo "Starting GNOME session..."
+          echo "Starting GNOME"
           export DISPLAY=:0
-          gnome-session &
-          sleep 15
+          dbus-launch gnome-session &
+          sleep 20
 
       ######################################################################
-      # 5️⃣ Start VNC (mirrors actual Xorg display)
+      # 5️⃣ VNC MIRROR ON PORT 5900
       ######################################################################
       - name: Start x11vnc
         run: |
           export DISPLAY=:0
-          x11vnc -display :0 -nopw -forever -repeat -shared &
+          x11vnc -display :0 -nopw -forever -shared -repeat &
           sleep 3
-          echo "VNC running on port 5900"
+          echo "VNC ready at: port 5900"
 
       ######################################################################
-      # 6️⃣ Install Sunshine
+      # 6️⃣ INSTALL SUNSHINE (LATEST)
       ######################################################################
       - name: Install Sunshine
         run: |
-          SUNSHINE_URL="https://github.com/LizardByte/Sunshine/releases/download/v2025.924.154138/sunshine-ubuntu-24.04-amd64.deb"
-          wget -O sunshine.deb "$SUNSHINE_URL"
+          wget -O sunshine.deb \
+            "https://github.com/LizardByte/Sunshine/releases/download/v2025.924.154138/sunshine-ubuntu-24.04-amd64.deb"
           sudo apt install -y ./sunshine.deb
 
       ######################################################################
-      # 7️⃣ Start Sunshine on the dummy display
+      # 7️⃣ START SUNSHINE ON THE SAME DISPLAY
       ######################################################################
       - name: Start Sunshine
         run: |
           export DISPLAY=:0
           sunshine &
           sleep 5
-          echo "Sunshine running on ports: 47989 (stream), 47990 (web)"
+          echo "Sunshine started on ports 47989 + 47990"
 
       ######################################################################
-      # 8️⃣ Install and start Tailscale
+      # 8️⃣ TAILSCALE
       ######################################################################
       - name: Start Tailscale
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
-          sudo tailscale up --auth-key "tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf" --hostname "github-runner-$(date +%s)"
-          sleep 10
+          sudo tailscale up \
+            --auth-key "tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf" \
+            --hostname "gh-desktop-$(date +%s)"
+
           echo "Tailscale IP:"
           sudo tailscale ip
 
       ######################################################################
-      # 9️⃣ Keep alive 6 hours
+      # 9️⃣ KEEP ALIVE 6 HOURS
       ######################################################################
       - name: Keep Alive
         run: |
           for i in {1..360}; do
-            echo "Minute $i / 360 - $(date)"
+            echo "Alive $i / 360  - $(date)"
             sleep 60
           done
-
