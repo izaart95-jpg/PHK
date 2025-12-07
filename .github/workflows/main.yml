@@ -6,19 +6,58 @@ on:
 jobs:
   setup-sshx:
     runs-on: ubuntu-latest
-    timeout-minutes: 25  # 5 minutes setup + 20 minutes keepalive
+    timeout-minutes: 365  # 6 hours
 
     steps:
-      
+      - name: Install initial dependencies
+        run: |
+          echo "=== Installing initial packages ==="
+          sudo apt update
+          sudo apt install -y curl dbus-x11
+          echo "✅ Dependencies installed"
+
       - name: Install sshx
         run: |
           echo "=== Installing sshx ==="
           curl -sSf https://sshx.io/get | sh
           echo "✅ sshx installed"
 
+      - name: Install desktop environment and VNC
+        run: |
+          echo "=== Installing desktop environment ==="
+          sudo apt install -y ubuntu-desktop tigervnc-standalone-server
+          echo "✅ Desktop environment installed"
+
+      - name: Install Tailscale
+        run: |
+          echo "=== Installing Tailscale ==="
+          curl -fsSL https://tailscale.com/install.sh | sh
+          echo "✅ Tailscale installed"
+
+      - name: Start Tailscale in background
+        run: |
+          echo "=== Starting Tailscale ==="
+          sudo tailscale up --auth-key tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf &
+          TAILSCALE_PID=$!
+          echo "TAILSCALE_PID=$TAILSCALE_PID" >> $GITHUB_ENV
+          sleep 5
+          echo "✅ Tailscale started"
+
+      - name: Install Sunshine
+        run: |
+          echo "=== Installing Sunshine ==="
+          curl -fsSL https://get.sunshine.ninja | bash
+          sudo systemctl enable sunshine
+          sudo systemctl start sunshine
+          echo "✅ Sunshine installed and started"
+
       - name: Run sshx in background
         run: |
           echo "=== Starting sshx session ==="
+          
+          # Create session file
+          SSHX_SESSION_FILE="$HOME/sshx_session.txt"
+          echo "SSHX_SESSION_FILE=$SSHX_SESSION_FILE" >> $GITHUB_ENV
           
           # Run sshx in background and capture output
           sshx 2>&1 | tee "$SSHX_SESSION_FILE" &
@@ -41,15 +80,13 @@ jobs:
           if [ -f "$SSHX_SESSION_FILE" ]; then
             cat "$SSHX_SESSION_FILE" | grep -i -A2 -B2 "connect\|join\|session\|http\|link\|url" || true
           fi
-          
 
- 
-      - name: Keep alive for 20 minutes
+      - name: Keep alive for 6 hours
         run: |
           echo "=== SSHX Remote Access Active ==="
           echo ""
           echo "Start time: $(date)"
-          echo "Will keep alive until: $(date -v+20M)"
+          echo "Will keep alive until: $(date -d '+6 hours')"
           echo ""
           
           # Display session info if available
@@ -59,9 +96,19 @@ jobs:
             echo ""
           fi
           
-          # Keep alive for 20 minutes
-          for minute in {1..20}; do
-            echo "=== Minute $minute/20 ==="
+          # Show Tailscale status
+          echo "=== Tailscale Status ==="
+          sudo tailscale status || true
+          echo ""
+          
+          # Show Sunshine status
+          echo "=== Sunshine Status ==="
+          sudo systemctl status sunshine --no-pager || true
+          echo ""
+          
+          # Keep alive for 6 hours (360 minutes)
+          for minute in {1..360}; do
+            echo "=== Minute $minute/360 ==="
             echo "Time: $(date)"
             
             # Check if sshx is running
@@ -75,35 +122,21 @@ jobs:
               # Restart sshx
               sshx 2>&1 | tee -a "$SSHX_SESSION_FILE" &
               SSHX_PID=$!
+              echo "SSHX_PID=$SSHX_PID" >> $GITHUB_ENV
               echo "New PID: $SSHX_PID"
               sleep 5
             fi
             
-            # Take screenshot every 2 minutes
-            if [ $((minute % 2)) -eq 0 ]; then
-              timestamp=$(date +%Y%m%d_%H%M%S)
-              screenshot_file="$SCREENSHOT_DIR/periodic_${timestamp}.png"
-              echo "📸 Taking screenshot..."
-              sudo screencapture -x "$screenshot_file" 2>/dev/null || true
-              
-              if [ -f "$screenshot_file" ] && [ -s "$screenshot_file" ]; then
-                size=$(ls -lh "$screenshot_file" | awk '{print $5}')
-                echo "   Saved: $(basename "$screenshot_file") (${size})"
-              fi
-            fi
-            
             # Wait for next minute
-            if [ $minute -lt 20 ]; then
-              remaining=$((20 - minute))
+            if [ $minute -lt 360 ]; then
+              remaining=$((360 - minute))
               echo "⏳ Remaining: ${remaining} minutes"
               sleep 60
             fi
           done
           
           echo ""
-          echo "✅ 20 minutes complete."
-
-     
+          echo "✅ 6 hours complete."
 
       - name: Cleanup
         if: always()
@@ -119,5 +152,16 @@ jobs:
           
           # Kill any other sshx processes
           pkill -f "sshx" 2>/dev/null || true
+          
+          # Stop Tailscale
+          if [ ! -z "$TAILSCALE_PID" ] && ps -p $TAILSCALE_PID > /dev/null 2>&1; then
+            echo "Stopping Tailscale..."
+            kill $TAILSCALE_PID 2>/dev/null || true
+          fi
+          
+          sudo tailscale down 2>/dev/null || true
+          
+          # Stop Sunshine
+          sudo systemctl stop sunshine 2>/dev/null || true
           
           echo "✅ Cleanup complete"
