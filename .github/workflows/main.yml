@@ -69,10 +69,7 @@ jobs:
             ubuntu-desktop \
             tigervnc-standalone-server \
             dbus-x11 \
-            xfce4 xfce4-goodies \
-            firefox \
-            novnc \
-            websockify
+           
             
           echo "✅ Ubuntu Desktop and VNC installed"
 
