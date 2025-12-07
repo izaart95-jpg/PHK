@@ -59,79 +59,25 @@ jobs:
             fi
           fi
 
-      - name: Install Ubuntu Desktop and VNC
+      - name: Install Ubuntu Desktop and required packages
         run: |
-          echo "=== Installing Ubuntu Desktop and VNC ==="
+          echo "=== Installing required packages ==="
           
-          # Install required packages
+          # Update and install required packages
           sudo apt-get update
-          sudo apt-get install -y \
-            ubuntu-desktop \
-            tigervnc-standalone-server \
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            ubuntu-desktop-minimal \
             dbus-x11 \
-            xserver-xorg-video-dummy \
-            xserver-xorg-input-void \
-            xserver-xorg-core \
             xinit \
-            openbox
+            xserver-xorg-core \
+            xserver-xorg-video-dummy \
+            x11-xserver-utils \
+            x11vnc \
+            pulseaudio \
+            mesa-utils \
+            libgl1-mesa-dri
             
-          echo "✅ Ubuntu Desktop and VNC installed"
-
-      - name: Create dummy display configuration
-        run: |
-          echo "=== Creating dummy display configuration ==="
-          
-          # Create Xorg configuration directory
-          sudo mkdir -p /etc/X11/xorg.conf.d
-          
-          # Create dummy display configuration
-          sudo tee /etc/X11/xorg.conf.d/10-headless-monitor.conf > /dev/null << 'EOF'
-Section "Device"
-  Identifier "DummyDevice"
-  Driver "dummy"
-  Option "IgnoreEDID" "true"
-  VideoRam 256000
-EndSection
-
-Section "Monitor"
-  Identifier "DummyMonitor"
-  HorizSync 30-70
-  VertRefresh 50-75
-  Modeline "1920x1080" 172.80 1920 2040 2248 2576 1080 1083 1088 1120
-EndSection
-
-Section "Screen"
-  Identifier "DummyScreen"
-  Device "DummyDevice"
-  Monitor "DummyMonitor"
-  DefaultDepth 24
-  SubSection "Display"
-    Depth 24
-    Modes "1920x1080"
-  EndSubSection
-EndSection
-
-Section "ServerLayout"
-  Identifier "DefaultLayout"
-  Screen "DummyScreen"
-  InputDevice "VoidMouse"
-  InputDevice "VoidKeyboard"
-EndSection
-
-Section "InputDevice"
-  Identifier "VoidMouse"
-  Driver "void"
-  Option "Device" "/dev/null"
-EndSection
-
-Section "InputDevice"
-  Identifier "VoidKeyboard"
-  Driver "void"
-  Option "Device" "/dev/null"
-EndSection
-EOF
-          
-          echo "✅ Dummy display configuration created"
+          echo "✅ Packages installed"
 
       - name: Install Tailscale
         run: |
@@ -152,6 +98,78 @@ EOF
           echo "=== Tailscale Status ==="
           sudo tailscale status || true
 
+      - name: Configure X11 dummy display for Sunshine
+        run: |
+          echo "=== Configuring X11 dummy display ==="
+          
+          # Create X11 configuration directory
+          sudo mkdir -p /etc/X11/xorg.conf.d
+          
+          # Create dummy display configuration
+          cat << EOF | sudo tee /etc/X11/xorg.conf.d/10-dummy.conf
+          Section "Device"
+            Identifier "DummyDevice"
+            Driver "dummy"
+            Option "IgnoreEDID" "true"
+            Option "NoDDC" "true"
+            VideoRam 256000
+          EndSection
+
+          Section "Monitor"
+            Identifier "DummyMonitor"
+            HorizSync 30-70
+            VertRefresh 50-75
+            Modeline "1920x1080" 172.80 1920 2040 2248 2576 1080 1083 1088 1120
+            Option "PreferredMode" "1920x1080"
+          EndSection
+
+          Section "Screen"
+            Identifier "DummyScreen"
+            Device "DummyDevice"
+            Monitor "DummyMonitor"
+            DefaultDepth 24
+            SubSection "Display"
+              Depth 24
+              Modes "1920x1080"
+            EndSubSection
+          EndSection
+
+          Section "ServerLayout"
+            Identifier "DefaultLayout"
+            Screen "DummyScreen"
+          EndSection
+          EOF
+          
+          echo "✅ X11 dummy display configured"
+
+      - name: Setup Sunshine user and permissions
+        run: |
+          echo "=== Setting up Sunshine permissions ==="
+          
+          # Create input device permissions
+          sudo groupadd -f -r input
+          sudo usermod -aG input,audio,video,render $(whoami)
+          
+          # Configure udev rules for virtual input devices
+          cat << EOF | sudo tee /etc/udev/rules.d/85-sunshine-input.rules
+          # uinput permissions
+          KERNEL=="uinput", MODE="0660", GROUP="input"
+          
+          # Virtual input devices
+          KERNEL=="event*", SUBSYSTEM=="input", MODE="0660", GROUP="input"
+          KERNEL=="mice", SUBSYSTEM=="input", MODE="0660", GROUP="input"
+          KERNEL=="mouse*", SUBSYSTEM=="input", MODE="0660", GROUP="input"
+          
+          # GPU permissions for render group
+          KERNEL=="renderD*", GROUP="render", MODE="0660"
+          EOF
+          
+          # Reload udev rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger
+          
+          echo "✅ Permissions configured"
+
       - name: Install Sunshine
         run: |
           echo "=== Installing Sunshine ==="
@@ -166,73 +184,81 @@ EOF
           echo "Installing Sunshine..."
           sudo apt install -y "./$SUNSHINE_DEB"
           
-          # Install software encoder dependencies
-          sudo apt-get install -y \
-            libavcodec-extra \
-            libva-dev \
-            libvdpau-dev \
-            libx264-dev \
-            libx265-dev \
-            libvpx-dev \
-            libfdk-aac-dev
-            
           echo "✅ Sunshine installed"
 
-      - name: Start Xorg and Sunshine
+      - name: Start X11 server with dummy display
         run: |
-          echo "=== Starting Xorg Display Server ==="
+          echo "=== Starting X11 server ==="
           
-          # Set display environment variable
-          export DISPLAY=:0
-          echo "DISPLAY=$DISPLAY" >> $GITHUB_ENV
+          # Stop any existing X servers
+          pkill Xorg 2>/dev/null || true
+          sleep 2
           
-          # Start Xorg with dummy driver on display :0
-          sudo Xorg :0 -config /etc/X11/xorg.conf.d/10-headless-monitor.conf -sharevts -noreset &
+          # Start X server with dummy driver on display :0
+          sudo Xorg :0 -config /etc/X11/xorg.conf.d/10-dummy.conf -noreset -novtswitch -sharevts -verbose 3 &
           XORG_PID=$!
           echo "XORG_PID=$XORG_PID" >> $GITHUB_ENV
           
-          # Wait for Xorg to start
+          # Wait for X server to start
           sleep 5
           
-          # Check if Xorg is running
-          if ps -p $XORG_PID > /dev/null 2>&1; then
-            echo "✅ Xorg running on display :0 (PID: $XORG_PID)"
+          # Set DISPLAY environment variable
+          export DISPLAY=:0
+          echo "DISPLAY=:0" >> $GITHUB_ENV
+          
+          # Check if X server is running
+          if xdpyinfo -display :0 >/dev/null 2>&1; then
+            echo "✅ X server running on display :0"
+            echo "X Server PID: $XORG_PID"
           else
-            echo "❌ Xorg failed to start"
+            echo "❌ X server failed to start"
             exit 1
           fi
+
+      - name: Start Sunshine and VNC
+        run: |
+          echo "=== Starting Sunshine and VNC ==="
           
-          # Start a simple window manager (Openbox)
+          # Set DISPLAY
           export DISPLAY=:0
-          openbox &
-          OPENBOX_PID=$!
-          echo "OPENBOX_PID=$OPENBOX_PID" >> $GITHUB_ENV
+          
+          # Start GNOME session in background
+          echo "Starting GNOME session..."
+          dbus-launch --exit-with-session gnome-session &
+          GNOME_PID=$!
+          echo "GNOME_PID=$GNOME_PID" >> $GITHUB_ENV
+          sleep 10
+          
+          # Start VNC server on display :0 (port 5900) for fallback access
+          echo "Starting VNC server..."
+          x11vnc -display :0 -forever -shared -rfbport 5900 -bg -noxdamage -passwd sunshine123 &
+          VNC_PID=$!
+          echo "VNC_PID=$VNC_PID" >> $GITHUB_ENV
+          
+          # Create Sunshine configuration directory with proper permissions
+          mkdir -p ~/.config/sunshine
           
           # Start Sunshine with proper environment
-          echo "=== Starting Sunshine ==="
-          export DISPLAY=:0
-          export WAYLAND_DISPLAY=wayland-0  # Set WAYLAND_DISPLAY to prevent the error
-          sunshine &
+          echo "Starting Sunshine..."
+          DISPLAY=:0 WAYLAND_DISPLAY= sunshine &
           SUNSHINE_PID=$!
           echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
           
-          # Wait for Sunshine to start
+          # Wait for Sunshine to initialize
           sleep 10
           
-          # Create initial credentials if needed
-          if [ ! -f /home/runner/.config/sunshine/sunshine_state.json ]; then
-            echo "=== Setting up Sunshine credentials ==="
-            # Sunshine should prompt for credentials on first web UI access
-            echo "Please access the web UI to set up credentials:"
-            echo "  - http://localhost:47990"
-            echo "  - Default username/password: sunshine/sunshine"
-          fi
+          echo "✅ Services started"
+          echo "Sunshine PID: $SUNSHINE_PID"
+          echo "VNC PID: $VNC_PID"
+          echo "GNOME PID: $GNOME_PID"
           
-          echo "✅ Sunshine started with PID: $SUNSHINE_PID"
-          echo "🌞 Web interface: http://localhost:47990"
-          echo "🌞 Streaming port: 47989"
-          echo "🌞 Display: :0"
-          echo "🌞 Using software encoder"
+          # Show connection info
+          echo ""
+          echo "=== Connection Information ==="
+          echo "Sunshine Web UI: https://localhost:47990"
+          echo "Sunshine Streaming: port 47989"
+          echo "VNC Server (fallback): port 5900"
+          echo "VNC Password: sunshine123"
 
       - name: Keep SSHX alive for 6 hours
         run: |
@@ -241,6 +267,9 @@ EOF
           echo "Start time: $(date)"
           echo "Will keep alive until: $(date -d '+6 hours')"
           echo ""
+          
+          # Set DISPLAY for all commands
+          export DISPLAY=:0
           
           # Display SSHX connection info
           if [ -f "$SSHX_SESSION_FILE" ]; then
@@ -258,16 +287,20 @@ EOF
           echo "=== Tailscale Status ==="
           sudo tailscale ip 2>/dev/null | head -1 | while read ip; do
             echo "🌐 Tailscale IP: $ip"
+            echo "🌐 Sunshine via Tailscale: https://$ip:47990"
+            echo "🌐 VNC via Tailscale: $ip:5900"
           done || echo "Tailscale IP not available"
           echo ""
           
           # Display Sunshine info
           echo "=== Sunshine Information ==="
-          echo "🌞 Sunshine Web Interface: http://localhost:47990"
-          echo "🌞 Sunshine via Tailscale: http://<tailscale-ip>:47990"
-          echo "🌞 Streaming Port: 47989"
-          echo "🌞 Display: :0"
-          echo "🌞 Using software encoder (CPU-based)"
+          echo "🌞 Sunshine Web Interface: https://localhost:47990"
+          echo "🌞 Sunshine Streaming Port: 47989"
+          echo "🌞 Default credentials: sunshine/sunshine"
+          echo ""
+          echo "=== VNC Information (fallback) ==="
+          echo "🖥️  VNC Server: port 5900"
+          echo "🔑 VNC Password: sunshine123"
           echo ""
           
           # Keep alive for 6 hours (360 minutes)
@@ -298,17 +331,51 @@ EOF
             if [ $((minute % 5)) -eq 0 ]; then
               echo "=== Service Status Check ==="
               
-              # Check Xorg
-              if [ ! -z "$XORG_PID" ] && ps -p $XORG_PID > /dev/null 2>&1; then
-                echo "✅ Xorg: Running (PID: $XORG_PID)"
-                echo "   Display: :0"
+              # Check X server
+              if ps -p $XORG_PID > /dev/null 2>&1; then
+                echo "✅ X Server: Running (PID: $XORG_PID)"
+                if xdpyinfo -display :0 >/dev/null 2>&1; then
+                  echo "   Display :0: Active"
+                else
+                  echo "   Display :0: Inactive, restarting X..."
+                  pkill Xorg 2>/dev/null || true
+                  sleep 2
+                  sudo Xorg :0 -config /etc/X11/xorg.conf.d/10-dummy.conf -noreset -novtswitch -sharevts &
+                  XORG_PID=$!
+                  echo "XORG_PID=$XORG_PID" >> $GITHUB_ENV
+                  sleep 5
+                fi
               else
-                echo "⚠️ Xorg: Not running, attempting restart..."
-                # Restart Xorg
-                sudo Xorg :0 -config /etc/X11/xorg.conf.d/10-headless-monitor.conf -sharevts -noreset &
+                echo "❌ X Server: Not running, restarting..."
+                sudo Xorg :0 -config /etc/X11/xorg.conf.d/10-dummy.conf -noreset -novtswitch -sharevts &
                 XORG_PID=$!
                 echo "XORG_PID=$XORG_PID" >> $GITHUB_ENV
                 sleep 5
+              fi
+              
+              # Check Sunshine
+              if ps -p $SUNSHINE_PID > /dev/null 2>&1; then
+                echo "✅ Sunshine: Running (PID: $SUNSHINE_PID)"
+                # Check if Sunshine web UI is responding
+                if curl -s -k https://localhost:47990 >/dev/null 2>&1; then
+                  echo "   Web UI: Accessible"
+                else
+                  echo "   Web UI: Not responding, restarting Sunshine..."
+                  pkill -f "sunshine" 2>/dev/null || true
+                  sleep 2
+                  DISPLAY=:0 WAYLAND_DISPLAY= sunshine &
+                  SUNSHINE_PID=$!
+                  echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
+                  sleep 10
+                fi
+              else
+                echo "⚠️ Sunshine: Not running, restarting..."
+                pkill -f "sunshine" 2>/dev/null || true
+                sleep 2
+                DISPLAY=:0 WAYLAND_DISPLAY= sunshine &
+                SUNSHINE_PID=$!
+                echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
+                sleep 10
               fi
               
               # Check Tailscale
@@ -318,30 +385,12 @@ EOF
                 TAILSCALE_IP=$(sudo tailscale ip 2>/dev/null | head -1 || echo "")
                 if [ ! -z "$TAILSCALE_IP" ]; then
                   echo "   IP Address: $TAILSCALE_IP"
-                  echo "   Sunshine via Tailscale: http://$TAILSCALE_IP:47990"
+                  echo "   Sunshine via Tailscale: https://$TAILSCALE_IP:47990"
+                  echo "   VNC via Tailscale: $TAILSCALE_IP:5900"
                 fi
               else
                 echo "⚠️ Tailscale: Not connected, attempting restart..."
                 sudo tailscale up --auth-key "tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf" --reset || true
-              fi
-              
-              # Check Sunshine
-              if [ ! -z "$SUNSHINE_PID" ] && ps -p $SUNSHINE_PID > /dev/null 2>&1; then
-                echo "✅ Sunshine: Running (PID: $SUNSHINE_PID)"
-                echo "   Web Interface: http://localhost:47990"
-                echo "   Streaming: port 47989"
-              else
-                echo "⚠️ Sunshine: Not running, attempting restart..."
-                # Kill any remaining sunshine processes
-                pkill -f "sunshine" 2>/dev/null || true
-                sleep 2
-                # Restart Sunshine
-                export DISPLAY=:0
-                export WAYLAND_DISPLAY=wayland-0
-                sunshine &
-                SUNSHINE_PID=$!
-                echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
-                sleep 10
               fi
             fi
             
@@ -374,9 +423,17 @@ EOF
           echo "Stopping Sunshine..."
           pkill -f "sunshine" 2>/dev/null || true
           
-          # Kill Xorg
-          echo "Stopping Xorg..."
-          pkill -f "Xorg" 2>/dev/null || true
+          # Kill VNC
+          echo "Stopping VNC..."
+          pkill -f "x11vnc" 2>/dev/null || true
+          
+          # Kill GNOME session
+          echo "Stopping GNOME session..."
+          pkill -f "gnome-session" 2>/dev/null || true
+          
+          # Kill X server
+          echo "Stopping X server..."
+          pkill Xorg 2>/dev/null || true
           
           # Stop Tailscale
           echo "Stopping Tailscale..."
