@@ -5,7 +5,7 @@ on:
 
 jobs:
   setup-sshx:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 25  # 5 minutes setup + 20 minutes keepalive
 
     steps:
