@@ -68,9 +68,70 @@ jobs:
           sudo apt-get install -y \
             ubuntu-desktop \
             tigervnc-standalone-server \
-            dbus-x11
+            dbus-x11 \
+            xserver-xorg-video-dummy \
+            xserver-xorg-input-void \
+            xserver-xorg-core \
+            xinit \
+            openbox
             
           echo "✅ Ubuntu Desktop and VNC installed"
+
+      - name: Create dummy display configuration
+        run: |
+          echo "=== Creating dummy display configuration ==="
+          
+          # Create Xorg configuration directory
+          sudo mkdir -p /etc/X11/xorg.conf.d
+          
+          # Create dummy display configuration
+          sudo tee /etc/X11/xorg.conf.d/10-headless-monitor.conf > /dev/null << 'EOF'
+Section "Device"
+  Identifier "DummyDevice"
+  Driver "dummy"
+  Option "IgnoreEDID" "true"
+  VideoRam 256000
+EndSection
+
+Section "Monitor"
+  Identifier "DummyMonitor"
+  HorizSync 30-70
+  VertRefresh 50-75
+  Modeline "1920x1080" 172.80 1920 2040 2248 2576 1080 1083 1088 1120
+EndSection
+
+Section "Screen"
+  Identifier "DummyScreen"
+  Device "DummyDevice"
+  Monitor "DummyMonitor"
+  DefaultDepth 24
+  SubSection "Display"
+    Depth 24
+    Modes "1920x1080"
+  EndSubSection
+EndSection
+
+Section "ServerLayout"
+  Identifier "DefaultLayout"
+  Screen "DummyScreen"
+  InputDevice "VoidMouse"
+  InputDevice "VoidKeyboard"
+EndSection
+
+Section "InputDevice"
+  Identifier "VoidMouse"
+  Driver "void"
+  Option "Device" "/dev/null"
+EndSection
+
+Section "InputDevice"
+  Identifier "VoidKeyboard"
+  Driver "void"
+  Option "Device" "/dev/null"
+EndSection
+EOF
+          
+          echo "✅ Dummy display configuration created"
 
       - name: Install Tailscale
         run: |
@@ -105,23 +166,73 @@ jobs:
           echo "Installing Sunshine..."
           sudo apt install -y "./$SUNSHINE_DEB"
           
-   
-          
+          # Install software encoder dependencies
+          sudo apt-get install -y \
+            libavcodec-extra \
+            libva-dev \
+            libvdpau-dev \
+            libx264-dev \
+            libx265-dev \
+            libvpx-dev \
+            libfdk-aac-dev
+            
           echo "✅ Sunshine installed"
+
+      - name: Start Xorg and Sunshine
+        run: |
+          echo "=== Starting Xorg Display Server ==="
           
+          # Set display environment variable
+          export DISPLAY=:0
+          echo "DISPLAY=$DISPLAY" >> $GITHUB_ENV
+          
+          # Start Xorg with dummy driver on display :0
+          sudo Xorg :0 -config /etc/X11/xorg.conf.d/10-headless-monitor.conf -sharevts -noreset &
+          XORG_PID=$!
+          echo "XORG_PID=$XORG_PID" >> $GITHUB_ENV
+          
+          # Wait for Xorg to start
+          sleep 5
+          
+          # Check if Xorg is running
+          if ps -p $XORG_PID > /dev/null 2>&1; then
+            echo "✅ Xorg running on display :0 (PID: $XORG_PID)"
+          else
+            echo "❌ Xorg failed to start"
+            exit 1
+          fi
+          
+          # Start a simple window manager (Openbox)
+          export DISPLAY=:0
+          openbox &
+          OPENBOX_PID=$!
+          echo "OPENBOX_PID=$OPENBOX_PID" >> $GITHUB_ENV
+          
+          # Start Sunshine with proper environment
           echo "=== Starting Sunshine ==="
-          # Start Sunshine in background
+          export DISPLAY=:0
+          export WAYLAND_DISPLAY=wayland-0  # Set WAYLAND_DISPLAY to prevent the error
           sunshine &
           SUNSHINE_PID=$!
-          echo "Sunshine PID: $SUNSHINE_PID"
           echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
           
           # Wait for Sunshine to start
-          sleep 5
+          sleep 10
           
-          echo "Sunshine should now be running on:"
-          echo "  - Web interface: http://localhost:47990"
-          echo "  - Streaming port: 47989"
+          # Create initial credentials if needed
+          if [ ! -f /home/runner/.config/sunshine/sunshine_state.json ]; then
+            echo "=== Setting up Sunshine credentials ==="
+            # Sunshine should prompt for credentials on first web UI access
+            echo "Please access the web UI to set up credentials:"
+            echo "  - http://localhost:47990"
+            echo "  - Default username/password: sunshine/sunshine"
+          fi
+          
+          echo "✅ Sunshine started with PID: $SUNSHINE_PID"
+          echo "🌞 Web interface: http://localhost:47990"
+          echo "🌞 Streaming port: 47989"
+          echo "🌞 Display: :0"
+          echo "🌞 Using software encoder"
 
       - name: Keep SSHX alive for 6 hours
         run: |
@@ -153,10 +264,10 @@ jobs:
           # Display Sunshine info
           echo "=== Sunshine Information ==="
           echo "🌞 Sunshine Web Interface: http://localhost:47990"
-          echo "🌞 Sunshine Streaming Port: 47989"
-          echo "🌞 Default credentials:"
-          echo "    Username: sunshine"
-          echo "    Password: sunshine"
+          echo "🌞 Sunshine via Tailscale: http://<tailscale-ip>:47990"
+          echo "🌞 Streaming Port: 47989"
+          echo "🌞 Display: :0"
+          echo "🌞 Using software encoder (CPU-based)"
           echo ""
           
           # Keep alive for 6 hours (360 minutes)
@@ -187,6 +298,19 @@ jobs:
             if [ $((minute % 5)) -eq 0 ]; then
               echo "=== Service Status Check ==="
               
+              # Check Xorg
+              if [ ! -z "$XORG_PID" ] && ps -p $XORG_PID > /dev/null 2>&1; then
+                echo "✅ Xorg: Running (PID: $XORG_PID)"
+                echo "   Display: :0"
+              else
+                echo "⚠️ Xorg: Not running, attempting restart..."
+                # Restart Xorg
+                sudo Xorg :0 -config /etc/X11/xorg.conf.d/10-headless-monitor.conf -sharevts -noreset &
+                XORG_PID=$!
+                echo "XORG_PID=$XORG_PID" >> $GITHUB_ENV
+                sleep 5
+              fi
+              
               # Check Tailscale
               if sudo tailscale status 2>/dev/null | grep -q "active"; then
                 echo "✅ Tailscale: Connected"
@@ -202,7 +326,7 @@ jobs:
               fi
               
               # Check Sunshine
-              if ps -p $SUNSHINE_PID > /dev/null 2>&1; then
+              if [ ! -z "$SUNSHINE_PID" ] && ps -p $SUNSHINE_PID > /dev/null 2>&1; then
                 echo "✅ Sunshine: Running (PID: $SUNSHINE_PID)"
                 echo "   Web Interface: http://localhost:47990"
                 echo "   Streaming: port 47989"
@@ -212,10 +336,12 @@ jobs:
                 pkill -f "sunshine" 2>/dev/null || true
                 sleep 2
                 # Restart Sunshine
+                export DISPLAY=:0
+                export WAYLAND_DISPLAY=wayland-0
                 sunshine &
                 SUNSHINE_PID=$!
                 echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
-                sleep 5
+                sleep 10
               fi
             fi
             
@@ -247,6 +373,10 @@ jobs:
           # Kill Sunshine
           echo "Stopping Sunshine..."
           pkill -f "sunshine" 2>/dev/null || true
+          
+          # Kill Xorg
+          echo "Stopping Xorg..."
+          pkill -f "Xorg" 2>/dev/null || true
           
           # Stop Tailscale
           echo "Stopping Tailscale..."
