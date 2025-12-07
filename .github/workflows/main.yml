@@ -17,7 +17,7 @@ jobs:
         run: |
           echo "=== Installing basic dependencies ==="
           sudo apt-get update
-          sudo apt-get install -y curl wget
+          sudo apt-get install -y curl wget ubuntu-desktop dbus-x11
           echo "✅ Dependencies installed"
 
       - name: Install sshx and show URL
