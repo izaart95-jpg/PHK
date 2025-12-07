@@ -6,42 +6,22 @@ on:
 jobs:
   setup-sshx:
     runs-on: ubuntu-latest
-    timeout-minutes: 365  # 6 hours
+    timeout-minutes: 365  # 6 hours + buffer
 
     steps:
-      - name: Install initial dependencies
+      - name: Install dependencies
         run: |
-          echo "=== Installing initial packages ==="
-          sudo apt update
-          sudo apt install -y curl dbus-x11
+          echo "=== Installing system dependencies ==="
+          sudo apt-get update
+          sudo apt-get install -y curl ubuntu-desktop tigervnc-standalone-server dbus-x11
           echo "✅ Dependencies installed"
-
-      - name: Install sshx
-        run: |
-          echo "=== Installing sshx ==="
-          curl -sSf https://sshx.io/get | sh
-          echo "✅ sshx installed"
-
-      - name: Install desktop environment and VNC
-        run: |
-          echo "=== Installing desktop environment ==="
-          sudo apt install -y ubuntu-desktop tigervnc-standalone-server
-          echo "✅ Desktop environment installed"
-
+      
       - name: Install Tailscale
         run: |
           echo "=== Installing Tailscale ==="
           curl -fsSL https://tailscale.com/install.sh | sh
-          echo "✅ Tailscale installed"
-
-      - name: Start Tailscale in background
-        run: |
-          echo "=== Starting Tailscale ==="
           sudo tailscale up --auth-key tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf &
-          TAILSCALE_PID=$!
-          echo "TAILSCALE_PID=$TAILSCALE_PID" >> $GITHUB_ENV
-          sleep 5
-          echo "✅ Tailscale started"
+          echo "✅ Tailscale installed and connected"
 
       - name: Install Sunshine
         run: |
@@ -51,35 +31,44 @@ jobs:
           sudo systemctl start sunshine
           echo "✅ Sunshine installed and started"
 
-      - name: Run sshx in background
+      - name: Install sshx
+        run: |
+          echo "=== Installing sshx ==="
+          curl -sSf https://sshx.io/get | sh
+          echo "✅ sshx installed"
+
+      - name: Start sshx and get URL
         run: |
           echo "=== Starting sshx session ==="
-          
-          # Create session file
-          SSHX_SESSION_FILE="$HOME/sshx_session.txt"
+          SSHX_SESSION_FILE="/tmp/sshx_session_$(date +%s).log"
           echo "SSHX_SESSION_FILE=$SSHX_SESSION_FILE" >> $GITHUB_ENV
           
-          # Run sshx in background and capture output
+          # Run sshx and capture output
           sshx 2>&1 | tee "$SSHX_SESSION_FILE" &
           SSHX_PID=$!
           echo "SSHX_PID=$SSHX_PID" >> $GITHUB_ENV
           
-          # Wait a moment for sshx to start
-          sleep 8
+          # Wait for sshx to initialize
+          sleep 10
           
-          # Check if sshx is running
-          if ps -p $SSHX_PID > /dev/null 2>&1; then
-            echo "✅ sshx running with PID: $SSHX_PID"
-          else
-            echo "⚠️ sshx may have exited"
-          fi
-          
-          # Show session info
+          # Extract and display the SSHX URL
           echo ""
-          echo "=== SSHX Session Info ==="
+          echo "=== SSHX Connection URL ==="
           if [ -f "$SSHX_SESSION_FILE" ]; then
-            cat "$SSHX_SESSION_FILE" | grep -i -A2 -B2 "connect\|join\|session\|http\|link\|url" || true
+            # Look for the URL in the output
+            SSHX_URL=$(grep -i "connect\|join\|session\|http" "$SSHX_SESSION_FILE" | grep -o 'https://[^ ]*' | head -1)
+            
+            if [ -n "$SSHX_URL" ]; then
+              echo "🔗 SSHX URL: $SSHX_URL"
+              echo "SSHX_URL=$SSHX_URL" >> $GITHUB_ENV
+            else
+              echo "⚠️ Could not extract SSHX URL from output. Check the session file:"
+              cat "$SSHX_SESSION_FILE"
+            fi
           fi
+          
+          # Keep sshx running
+          echo "✅ sshx running with PID: $SSHX_PID"
 
       - name: Keep alive for 6 hours
         run: |
@@ -89,27 +78,16 @@ jobs:
           echo "Will keep alive until: $(date -d '+6 hours')"
           echo ""
           
-          # Display session info if available
-          if [ -f "$SSHX_SESSION_FILE" ]; then
-            echo "=== Session Information ==="
-            cat "$SSHX_SESSION_FILE" | grep -i "connect\|join\|session\|http\|link\|url" | head -5 || true
-            echo ""
+          # Display the SSHX URL
+          if [ -n "$SSHX_URL" ]; then
+            echo "🔗 Connect using: $SSHX_URL"
           fi
-          
-          # Show Tailscale status
-          echo "=== Tailscale Status ==="
-          sudo tailscale status || true
-          echo ""
-          
-          # Show Sunshine status
-          echo "=== Sunshine Status ==="
-          sudo systemctl status sunshine --no-pager || true
-          echo ""
           
           # Keep alive for 6 hours (360 minutes)
           for minute in {1..360}; do
             echo "=== Minute $minute/360 ==="
             echo "Time: $(date)"
+            echo "Uptime: $((minute/60))h $((minute%60))m"
             
             # Check if sshx is running
             if ps -p $SSHX_PID > /dev/null 2>&1; then
@@ -124,19 +102,40 @@ jobs:
               SSHX_PID=$!
               echo "SSHX_PID=$SSHX_PID" >> $GITHUB_ENV
               echo "New PID: $SSHX_PID"
-              sleep 5
+              sleep 10
+              
+              # Try to get new URL
+              if [ -f "$SSHX_SESSION_FILE" ]; then
+                SSHX_URL=$(grep -i "connect\|join\|session\|http" "$SSHX_SESSION_FILE" | grep -o 'https://[^ ]*' | tail -1)
+                if [ -n "$SSHX_URL" ]; then
+                  echo "🔗 New SSHX URL: $SSHX_URL"
+                  echo "SSHX_URL=$SSHX_URL" >> $GITHUB_ENV
+                fi
+              fi
+            fi
+            
+            # Check Tailscale status
+            if command -v tailscale &> /dev/null; then
+              tailscale status --peers=false && echo "✅ Tailscale: Connected" || echo "⚠️ Tailscale: Not connected"
+            fi
+            
+            # Check Sunshine status
+            if systemctl is-active --quiet sunshine; then
+              echo "✅ Sunshine: Running"
+            else
+              echo "⚠️ Sunshine: Not running"
             fi
             
             # Wait for next minute
             if [ $minute -lt 360 ]; then
               remaining=$((360 - minute))
-              echo "⏳ Remaining: ${remaining} minutes"
+              echo "⏳ Remaining: $((remaining/60))h $((remaining%60))m"
               sleep 60
             fi
           done
           
           echo ""
-          echo "✅ 6 hours complete."
+          echo "✅ 6 hours complete. Session ending."
 
       - name: Cleanup
         if: always()
@@ -152,16 +151,5 @@ jobs:
           
           # Kill any other sshx processes
           pkill -f "sshx" 2>/dev/null || true
-          
-          # Stop Tailscale
-          if [ ! -z "$TAILSCALE_PID" ] && ps -p $TAILSCALE_PID > /dev/null 2>&1; then
-            echo "Stopping Tailscale..."
-            kill $TAILSCALE_PID 2>/dev/null || true
-          fi
-          
-          sudo tailscale down 2>/dev/null || true
-          
-          # Stop Sunshine
-          sudo systemctl stop sunshine 2>/dev/null || true
           
           echo "✅ Cleanup complete"
