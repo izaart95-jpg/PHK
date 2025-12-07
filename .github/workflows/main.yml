@@ -134,6 +134,42 @@ jobs:
           echo "    Password: sunshine"
           echo ""
           
+                - name: Keep SSHX alive for 6 hours
+        run: |
+          echo "=== SSHX Remote Access Active ==="
+          echo ""
+          echo "Start time: $(date)"
+          echo "Will keep alive until: $(date -d '+6 hours')"
+          echo ""
+          
+          # Display SSHX connection info
+          if [ -f "$SSHX_SESSION_FILE" ]; then
+            echo "=== SSHX Session Information ==="
+            SSHX_URL=$(grep -o "https://sshx.io/[a-zA-Z0-9-]\+" "$SSHX_SESSION_FILE" | head -1 || true)
+            if [ ! -z "$SSHX_URL" ]; then
+              echo "🔗 SSHX Connection URL: $SSHX_URL"
+            else
+              echo "⚠️ SSHX URL not found in logs"
+            fi
+            echo ""
+          fi
+          
+          # Display Tailscale IP if connected
+          echo "=== Tailscale Status ==="
+          sudo tailscale ip 2>/dev/null | head -1 | while read ip; do
+            echo "🌐 Tailscale IP: $ip"
+          done || echo "Tailscale IP not available"
+          echo ""
+          
+          # Display Sunshine info
+          echo "=== Sunshine Information ==="
+          echo "🌞 Sunshine Web Interface: http://localhost:47990"
+          echo "🌞 Sunshine Streaming Port: 47989"
+          echo "🌞 Default credentials:"
+          echo "    Username: sunshine"
+          echo "    Password: sunshine"
+          echo ""
+          
           # Keep alive for 6 hours (360 minutes)
           TOTAL_MINUTES=360
           for minute in $(seq 1 $TOTAL_MINUTES); do
@@ -176,7 +212,13 @@ jobs:
                 sudo tailscale up --auth-key "tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf" --reset || true
               fi
               
-         
+              # You might want to add Sunshine status check here
+              # if pgrep -x "sunshine" >/dev/null; then
+              #   echo "✅ Sunshine: Running"
+              # else
+              #   echo "❌ Sunshine: Not running"
+              # fi
+            fi
             
             # Wait for next minute
             if [ $minute -lt $TOTAL_MINUTES ]; then
@@ -187,7 +229,6 @@ jobs:
           
           echo ""
           echo "✅ 6 hours complete. Session ending."
-
       - name: Cleanup
         if: always()
         run: |
