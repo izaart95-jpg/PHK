@@ -95,25 +95,7 @@ jobs:
           echo "=== Tailscale Status ==="
           sudo tailscale status || true
 
-      - name: Install Sunshine (skip if fails)
-        run: |
-          echo "=== Installing Sunshine ==="
-          
-          # Install curl if not already installed (though it should be)
-          sudo apt-get install -y curl
-          
-          # Try to install Sunshine, continue even if it fails
-          if curl -fsSL https://get.sunshine.ninja | bash; then
-            echo "✅ Sunshine installation successful"
-            
-            # Enable and start Sunshine
-            sudo systemctl enable sunshine
-            sudo systemctl start sunshine
-            
-            echo "✅ Sunshine service started"
-          else
-            echo "⚠️ Sunshine installation failed, skipping..."
-          fi
+ 
 
       - name: Keep SSHX alive for 6 hours
         run: |
