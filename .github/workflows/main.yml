@@ -219,7 +219,7 @@ jobs:
           
           # Click at 710,73
           echo "Clicking at coordinates (710, 73)..."
-          cliclick c:710,73
+          cliclick c:561,155
           sleep 1
           screenshot_file="$SCREENSHOT_DIR/12_after_710_73_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
