@@ -6,7 +6,7 @@ on:
 jobs:
   sshx-session:
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 360
     
     env:
       SSHX_SESSION_FILE: /tmp/sshx_output.txt
@@ -84,6 +84,6 @@ jobs:
           fi
           
           # Keep workflow running
-          echo "Waiting 600 seconds..."
-          sleep 600
+          echo "Waiting 6000 seconds..."
+          sleep 21600
           echo "Session complete"
