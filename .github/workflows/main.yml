@@ -1,47 +1,531 @@
-      - name: Launch VNC Viewer
+name: Sunshine macOS Testing with Tailscale
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sunshine-tailscale-test:
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Check macOS Version
         run: |
-          echo "=== Launching VNC Viewer ==="
+          echo "=== macOS Version ==="
+          sw_vers
+          echo "Architecture: $(uname -m)"
+          system_profiler SPSoftwareDataType | grep "System Version"
+
+      - name: Install Homebrew
+        run: |
+          echo "=== Installing Homebrew ==="
           
-          # Clean up any existing instances
-          pkill -f "VNC Viewer" 2>/dev/null || true
-          pkill -f "VNC-Viewer" 2>/dev/null || true
-          sleep 2
-          
-          # Determine which app to launch
-          if [ -d "/Applications/VNC Viewer.app" ]; then
-            APP_PATH="/Applications/VNC Viewer.app"
-            APP_NAME="VNC Viewer"
-          elif [ -n "$INSTALLED_APP_NAME" ] && [ -d "/Applications/$INSTALLED_APP_NAME" ]; then
-            APP_PATH="/Applications/$INSTALLED_APP_NAME"
-            APP_NAME="$INSTALLED_APP_NAME"
-            APP_NAME="${APP_NAME%.app}"  # Remove .app extension
+          # Check if Homebrew is already installed
+          if ! command -v brew &> /dev/null; then
+            echo "Installing Homebrew..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            
+            # Add Homebrew to PATH
+            if [ "$(uname -m)" = "arm64" ]; then
+              echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+              eval "$(/opt/homebrew/bin/brew shellenv)"
+            else
+              echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile
+              eval "$(/usr/local/bin/brew shellenv)"
+            fi
           else
-            echo "❌ VNC Viewer not found in Applications!"
-            exit 1
+            echo "✅ Homebrew already installed"
+            brew --version
           fi
           
-          echo "Launching VNC Viewer from: $APP_PATH"
-          echo "App name: $APP_NAME"
+          # Update Homebrew
+          brew update
+
+      - name: Install Tailscale and Start Service
+        run: |
+          echo "=== Installing Tailscale ==="
           
-          open -a "$APP_PATH"
+          # Install Tailscale via Homebrew
+          brew install tailscale
           
-          echo "APP_NAME=\"$APP_NAME\"" >> $GITHUB_ENV
-          echo "APP_PATH=\"$APP_PATH\"" >> $GITHUB_ENV
+          echo "=== Starting Tailscale Service ==="
           
-          # Wait for app to launch
-          echo "Waiting for VNC Viewer to launch..."
-          for i in {1..30}; do
-            if pgrep -f "$APP_NAME" > /dev/null; then
-              echo "✅ $APP_NAME process found (attempt $i)"
-              break
-            fi
-            sleep 1
-          done
+          # Start Tailscale as a background service
+          sudo brew services start tailscale
           
-          # Additional wait for UI to load
+          # Wait for service to start
+          echo "Waiting for Tailscale service to start..."
           sleep 5
           
-          # Take screenshot after launch
-          launch_file="$SCREENSHOT_DIR/02_after_launch_$(date +%H%M%S).png"
-          screencapture -x "$launch_file"
-          echo "📸 Launch screenshot taken"
+          # Check if Tailscale is running
+          if sudo brew services list | grep tailscale | grep -q started; then
+            echo "✅ Tailscale service started successfully"
+          else
+            echo "⚠️ Tailscale service may not have started properly"
+            echo "Attempting to start manually..."
+            sudo /opt/homebrew/opt/tailscale/bin/tailscaled &
+            sleep 3
+          fi
+          
+          # Verify Tailscale daemon is running
+          if pgrep -x tailscaled > /dev/null; then
+            echo "✅ Tailscale daemon is running"
+          else
+            echo "❌ Tailscale daemon failed to start"
+            exit 1
+          fi
+
+      - name: Connect to Tailscale Network
+        run: |
+          echo "=== Connecting to Tailscale Network ==="
+          
+          # First, check Tailscale status
+          echo "Tailscale status before connect:"
+          tailscale status 2>/dev/null || echo "Tailscale not yet connected"
+          
+          # Connect to Tailscale with auth key
+          echo "Connecting with auth key..."
+          sudo tailscale up --authkey tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf --accept-routes --accept-dns
+          
+          # Wait for connection
+          sleep 3
+          
+          # Check Tailscale status
+          echo "Tailscale status after connect:"
+          tailscale status
+          
+          # Get Tailscale IP
+          TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || echo "Not connected")
+          echo "Tailscale IP: $TAILSCALE_IP"
+          echo "TAILSCALE_IP=$TAILSCALE_IP" >> $GITHUB_ENV
+          
+          # If no IP yet, try a few more times
+          if [ "$TAILSCALE_IP" = "Not connected" ] || [ -z "$TAILSCALE_IP" ]; then
+            echo "Waiting for Tailscale connection to establish..."
+            for i in {1..5}; do
+              sleep 3
+              TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || echo "Not connected")
+              if [ "$TAILSCALE_IP" != "Not connected" ] && [ -n "$TAILSCALE_IP" ]; then
+                echo "✅ Got Tailscale IP on attempt $i: $TAILSCALE_IP"
+                echo "TAILSCALE_IP=$TAILSCALE_IP" >> $GITHUB_ENV
+                break
+              fi
+            done
+          fi
+          
+          # Log Tailscale info to file for debugging
+          echo "Tailscale Debug Info:" > tailscale_debug.log
+          echo "IP: $TAILSCALE_IP" >> tailscale_debug.log
+          tailscale status >> tailscale_debug.log 2>&1
+          tailscale version >> tailscale_debug.log 2>&1
+
+      - name: Install Sunshine via LizardByte Tap
+        run: |
+          echo "=== Installing Sunshine ==="
+          
+          # Add LizardByte tap
+          echo "Adding LizardByte/homebrew tap..."
+          brew tap LizardByte/homebrew
+          
+          # Install Sunshine
+          echo "Installing Sunshine..."
+          brew install sunshine
+          
+          # Verify installation
+          echo "Sunshine installation verification:"
+          which sunshine || echo "Sunshine not in PATH"
+          ls -la "$(brew --prefix sunshine)/bin/" || true
+          
+          # Check Sunshine version
+          sunshine --version 2>/dev/null || echo "Could not get Sunshine version"
+
+      - name: Configure Sunshine
+        run: |
+          echo "=== Configuring Sunshine ==="
+          
+          # Create Sunshine config directory
+          mkdir -p ~/.config/sunshine
+          
+          # Create basic Sunshine config
+          SUNSHINE_CONFIG=~/.config/sunshine/sunshine.conf
+          
+          # Get or generate default config
+          echo "Generating Sunshine configuration..."
+          
+          # Try to get IP (use localhost if Tailscale not connected)
+          if [ -n "${{ env.TAILSCALE_IP }}" ] && [ "${{ env.TAILSCALE_IP }}" != "Not connected" ]; then
+            EXTERNAL_IP="${{ env.TAILSCALE_IP }}"
+          else
+            EXTERNAL_IP="127.0.0.1"
+          fi
+          
+          cat > "$SUNSHINE_CONFIG" << EOF
+          # Sunshine Configuration
+          # Generated for GitHub Actions test
+          
+          [nvhttp]
+          port = 47989
+          pkey = sunshine
+          cert = sunshine
+          
+          [app]
+          sources = 1
+          
+          [video]
+          encoder = auto
+          output = 1280x720
+          fps = 30
+          
+          # External access
+          [external_ip]
+          address = $EXTERNAL_IP
+          EOF
+          
+          echo "Sunshine configuration created at: $SUNSHINE_CONFIG"
+          echo "Using external IP: $EXTERNAL_IP"
+          echo "Configuration content:"
+          cat "$SUNSHINE_CONFIG"
+
+      - name: Create Screenshot Directory
+        run: |
+          echo "=== Creating Screenshot Directory ==="
+          mkdir -p screenshots
+          SCREENSHOT_DIR="$(pwd)/screenshots"
+          echo "SCREENSHOT_DIR=$SCREENSHOT_DIR" >> $GITHUB_ENV
+          
+          # Create metadata file in the correct location
+          METADATA_FILE="$SCREENSHOT_DIR/metadata.txt"
+          echo "Sunshine + Tailscale Test Session" > "$METADATA_FILE"
+          echo "=================================" >> "$METADATA_FILE"
+          echo "Date: $(date)" >> "$METADATA_FILE"
+          echo "macOS Version: $(sw_vers -productVersion)" >> "$METADATA_FILE"
+          echo "Architecture: $(uname -m)" >> "$METADATA_FILE"
+          echo "Tailscale IP: ${{ env.TAILSCALE_IP }}" >> "$METADATA_FILE"
+          echo "External IP used: $EXTERNAL_IP" >> "$METADATA_FILE"
+          echo "" >> "$METADATA_FILE"
+          
+          echo "✅ Screenshot directory created at: $SCREENSHOT_DIR"
+
+      - name: Get Display Information
+        run: |
+          echo "=== Display Information ==="
+          
+          # Get screen resolution
+          echo "Screen Information:"
+          system_profiler SPDisplaysDataType | grep -A5 "Display" || true
+          
+          # Get resolution for calculations
+          RESOLUTION=$(system_profiler SPDisplaysDataType 2>/dev/null | grep -A1 "Resolution:" | tail -1 | tr -d ' ' | sed 's/[^0-9x]//g' || echo "1440x900")
+          
+          if [ -z "$RESOLUTION" ] || [ "$RESOLUTION" = "0x0" ]; then
+            RESOLUTION="1440x900"  # Default for macOS runners
+            echo "⚠️ Using default resolution: $RESOLUTION"
+          else
+            echo "Detected resolution: $RESOLUTION"
+          fi
+          
+          echo "RESOLUTION=$RESOLUTION" >> $GITHUB_ENV
+          echo "=== Display Info ===" >> "$SCREENSHOT_DIR/metadata.txt"
+          echo "Resolution: $RESOLUTION" >> "$SCREENSHOT_DIR/metadata.txt"
+
+      - name: Start Sunshine Service
+        run: |
+          echo "=== Starting Sunshine ==="
+          
+          # Kill any existing Sunshine processes
+          pkill -f sunshine 2>/dev/null || true
+          sleep 2
+          
+          # Use the proper brew services command for Sunshine
+          echo "Starting Sunshine via brew services..."
+          brew services start lizardbyte/homebrew/sunshine
+          
+          # Wait for service to start
+          echo "Waiting for Sunshine to initialize..."
+          sleep 10
+          
+          # Check if Sunshine is running
+          if brew services list | grep sunshine | grep -q started; then
+            echo "✅ Sunshine service started successfully"
+            SUNSHINE_PID=$(pgrep -f sunshine | head -1)
+            echo "Sunshine PID: $SUNSHINE_PID"
+            echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
+          else
+            echo "⚠️ Sunshine service may not have started via brew"
+            echo "Attempting to start Sunshine directly..."
+            
+            # Create startup script to run Sunshine with proper environment
+            STARTUP_SCRIPT="start_sunshine.sh"
+            cat > "$STARTUP_SCRIPT" << 'EOF'
+            #!/bin/bash
+            # Start Sunshine with proper environment
+            export PATH="/opt/homebrew/bin:$PATH"
+            export HOME="$HOME"
+            
+            echo "Starting Sunshine at $(date)"
+            echo "PATH: $PATH"
+            echo "HOME: $HOME"
+            
+            # Run Sunshine
+            sunshine --creds 2>&1 | tee sunshine_output.log
+            EOF
+            
+            chmod +x "$STARTUP_SCRIPT"
+            
+            # Start Sunshine in the background
+            nohup ./"$STARTUP_SCRIPT" > sunshine_nohup.log 2>&1 &
+            SUNSHINE_PID=$!
+            echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
+            sleep 5
+          fi
+          
+          # Wait for Sunshine to start properly
+          echo "Waiting for Sunshine to fully start..."
+          for i in {1..10}; do
+            if [ -n "$SUNSHINE_PID" ] && ps -p $SUNSHINE_PID > /dev/null; then
+              echo "✅ Sunshine process is running (PID: $SUNSHINE_PID)"
+              
+              # Check if it's listening on the port
+              if lsof -i :47989 -n -P | grep -q LISTEN; then
+                echo "✅ Sunshine is listening on port 47989"
+                break
+              fi
+            fi
+            echo "Waiting... ($i/10)"
+            sleep 3
+          done
+          
+          # Log Sunshine status
+          echo "=== Sunshine Status ===" >> "$SCREENSHOT_DIR/metadata.txt"
+          echo "PID: $SUNSHINE_PID" >> "$SCREENSHOT_DIR/metadata.txt"
+          echo "Port 47989 listening: $(lsof -i :47989 -n -P >/dev/null 2>&1 && echo 'Yes' || echo 'No')" >> "$SCREENSHOT_DIR/metadata.txt"
+          
+          # Check listening ports
+          echo "Checking listening ports..."
+          lsof -i -P -n | grep LISTEN | grep -E "(sunshine|47989)" || echo "No matching ports found"
+
+      - name: Initial Screenshots (5 screenshots, 1 per second)
+        run: |
+          echo "=== Taking 5 Initial Screenshots (1 per second) ==="
+          
+          for i in {1..5}; do
+            timestamp=$(date +%Y%m%d_%H%M%S)
+            screenshot_file="$SCREENSHOT_DIR/01_initial_${i}_${timestamp}.png"
+            
+            echo "Taking screenshot $i..."
+            screencapture -x "$screenshot_file"
+            
+            if [ -f "$screenshot_file" ]; then
+              filesize=$(ls -lh "$screenshot_file" | awk '{print $5}')
+              echo "✅ Screenshot $i: $filesize"
+              
+              # Add to metadata
+              echo "Screenshot $i: $(basename "$screenshot_file") ($filesize)" >> "$SCREENSHOT_DIR/metadata.txt"
+            else
+              echo "⚠️ Failed to take screenshot $i"
+            fi
+            
+            # Wait 1 second between screenshots
+            if [ $i -lt 5 ]; then
+              sleep 1
+            fi
+          done
+          
+          echo "✅ Initial screenshot sequence complete"
+
+      - name: Upload Initial Screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: sunshine-initial-screenshots
+          path: |
+            ${{ env.SCREENSHOT_DIR }}/01_initial_*.png
+            tailscale_debug.log
+          retention-days: 7
+
+      - name: Extended Monitoring (10 minutes, 2 screenshots per minute)
+        run: |
+          echo "=== Starting 10-Minute Extended Monitoring ==="
+          echo "Will take 2 screenshots per minute for 10 minutes"
+          echo "Total: 20 additional screenshots"
+          
+          # Calculate total minutes
+          TOTAL_MINUTES=10
+          SCREENSHOTS_PER_MINUTE=2
+          TOTAL_SCREENSHOTS=$((TOTAL_MINUTES * SCREENSHOTS_PER_MINUTE))
+          
+          echo "Duration: $TOTAL_MINUTES minutes"
+          echo "Screenshots per minute: $SCREENSHOTS_PER_MINUTE"
+          echo "Total expected screenshots: $TOTAL_SCREENSHOTS"
+          echo ""
+          echo "Starting at: $(date)"
+          
+          # Create monitoring log
+          MONITOR_LOG="$SCREENSHOT_DIR/monitoring.log"
+          echo "Extended Monitoring Log" > "$MONITOR_LOG"
+          echo "======================" >> "$MONITOR_LOG"
+          echo "Start time: $(date)" >> "$MONITOR_LOG"
+          echo "Duration: $TOTAL_MINUTES minutes" >> "$MONITOR_LOG"
+          
+          # Monitor loop
+          for minute in $(seq 1 $TOTAL_MINUTES); do
+            echo ""
+            echo "=== Minute $minute/$TOTAL_MINUTES ==="
+            echo "Minute $minute started at: $(date +%H:%M:%S)" >> "$MONITOR_LOG"
+            
+            # Take screenshots for this minute
+            for shot_num in $(seq 1 $SCREENSHOTS_PER_MINUTE); do
+              screenshot_counter=$(((minute - 1) * SCREENSHOTS_PER_MINUTE + shot_num + 5))
+              
+              # Format counter with leading zeros
+              counter_formatted=$(printf "%02d" $screenshot_counter)
+              timestamp=$(date +%Y%m%d_%H%M%S)
+              screenshot_file="$SCREENSHOT_DIR/${counter_formatted}_monitoring_${timestamp}.png"
+              
+              echo "Taking screenshot $counter_formatted..."
+              screencapture -x "$screenshot_file"
+              
+              if [ -f "$screenshot_file" ]; then
+                filesize=$(ls -lh "$screenshot_file" | awk '{print $5}')
+                echo "✅ Screenshot $counter_formatted: $filesize"
+                
+                # Log to monitoring file
+                echo "  Screenshot $counter_formatted: $(basename "$screenshot_file") ($filesize)" >> "$MONITOR_LOG"
+              else
+                echo "⚠️ Failed to take screenshot $counter_formatted"
+              fi
+              
+              # Wait between screenshots in the same minute (except after last)
+              if [ $shot_num -lt $SCREENSHOTS_PER_MINUTE ]; then
+                sleep 30  # 30 seconds between screenshots in same minute
+              fi
+            done
+            
+            # Check service status every minute
+            echo "Service Status Check:" >> "$MONITOR_LOG"
+            
+            # Check Tailscale
+            if tailscale status 2>/dev/null | grep -q "active"; then
+              echo "  Tailscale: Active" >> "$MONITOR_LOG"
+            else
+              echo "  Tailscale: Not active" >> "$MONITOR_LOG"
+            fi
+            
+            # Check Sunshine
+            if [ -n "$SUNSHINE_PID" ] && ps -p $SUNSHINE_PID > /dev/null 2>&1; then
+              echo "  Sunshine: Running (PID: $SUNSHINE_PID)" >> "$MONITOR_LOG"
+            else
+              echo "  Sunshine: Not running" >> "$MONITOR_LOG"
+            fi
+            
+            # Wait for next minute (unless this is the last minute)
+            if [ $minute -lt $TOTAL_MINUTES ]; then
+              echo "Waiting for next minute..."
+              sleep 30  # Already waited 30 seconds for second screenshot
+            fi
+          done
+          
+          echo ""
+          echo "✅ Extended monitoring complete!"
+          echo "End time: $(date)" >> "$MONITOR_LOG"
+          echo "Total monitoring duration: $TOTAL_MINUTES minutes" >> "$MONITOR_LOG"
+
+      - name: Final System Check
+        run: |
+          echo "=== Final System Check ==="
+          
+          # Create system check file
+          SYSTEM_CHECK="$SCREENSHOT_DIR/system_check.txt"
+          
+          echo "Final System Status" > "$SYSTEM_CHECK"
+          echo "===================" >> "$SYSTEM_CHECK"
+          echo "Check time: $(date)" >> "$SYSTEM_CHECK"
+          echo "" >> "$SYSTEM_CHECK"
+          
+          # Check running processes
+          echo "Running Processes:" >> "$SYSTEM_CHECK"
+          echo "-----------------" >> "$SYSTEM_CHECK"
+          ps aux | grep -E "(sunshine|tailscale)" | grep -v grep >> "$SYSTEM_CHECK" || echo "No matching processes found" >> "$SYSTEM_CHECK"
+          echo "" >> "$SYSTEM_CHECK"
+          
+          # Check network connections
+          echo "Network Connections:" >> "$SYSTEM_CHECK"
+          echo "-------------------" >> "$SYSTEM_CHECK"
+          lsof -i -P -n | grep -E "(47989|tailscale)" >> "$SYSTEM_CHECK" || echo "No matching connections" >> "$SYSTEM_CHECK"
+          echo "" >> "$SYSTEM_CHECK"
+          
+          # Check Tailscale status
+          echo "Tailscale Final Status:" >> "$SYSTEM_CHECK"
+          echo "----------------------" >> "$SYSTEM_CHECK"
+          tailscale status 2>&1 >> "$SYSTEM_CHECK" || echo "Tailscale command failed" >> "$SYSTEM_CHECK"
+          echo "" >> "$SYSTEM_CHECK"
+          
+          # Count screenshots
+          TOTAL_SCREENSHOTS=$(find "$SCREENSHOT_DIR" -name "*.png" 2>/dev/null | wc -l)
+          echo "Total Screenshots Captured: $TOTAL_SCREENSHOTS" >> "$SYSTEM_CHECK"
+          echo "Expected: 25" >> "$SYSTEM_CHECK"
+          echo "" >> "$SYSTEM_CHECK"
+          
+          # Disk usage
+          echo "Storage Usage:" >> "$SYSTEM_CHECK"
+          echo "-------------" >> "$SYSTEM_CHECK"
+          du -sh "$SCREENSHOT_DIR" >> "$SYSTEM_CHECK"
+          
+          echo "✅ System check complete"
+
+      - name: Upload Monitoring Screenshots and Logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sunshine-monitoring-data
+          path: |
+            ${{ env.SCREENSHOT_DIR }}
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "=== Cleaning Up ==="
+          
+          # Stop Sunshine
+          echo "Stopping Sunshine..."
+          brew services stop lizardbyte/homebrew/sunshine 2>/dev/null || true
+          pkill -f sunshine 2>/dev/null || true
+          sleep 2
+          pkill -9 -f sunshine 2>/dev/null || true
+          
+          # Disconnect Tailscale
+          echo "Disconnecting Tailscale..."
+          sudo tailscale down 2>/dev/null || true
+          
+          # Stop Tailscale service
+          echo "Stopping Tailscale service..."
+          sudo brew services stop tailscale 2>/dev/null || true
+          
+          # Kill any remaining processes
+          pkill -9 -f tailscaled 2>/dev/null || true
+          
+          # List all artifacts
+          echo ""
+          echo "=== Final Artifact Summary ==="
+          echo "Screenshots directory: ${{ env.SCREENSHOT_DIR }}"
+          echo "Total screenshots: $(find "${{ env.SCREENSHOT_DIR }}" -name "*.png" 2>/dev/null | wc -l)"
+          ls -lh "${{ env.SCREENSHOT_DIR }}/" 2>/dev/null || echo "Screenshot directory not found"
+
+      - name: Final Report
+        run: |
+          echo "=== Sunshine + Tailscale Test Complete ==="
+          echo ""
+          echo "📊 Test Summary:"
+          echo "  macOS Version: $(sw_vers -productVersion)"
+          echo "  Architecture: $(uname -m)"
+          echo "  Tailscale IP: ${{ env.TAILSCALE_IP }}"
+          echo "  Initial Screenshots: 5 (1 per second)"
+          echo "  Monitoring Screenshots: 20 (2 per minute for 10 minutes)"
+          echo "  Total Expected Screenshots: 25"
+          echo "  Total Actual Screenshots: $(find "${{ env.SCREENSHOT_DIR }}" -name "*.png" 2>/dev/null | wc -l)"
+          echo "  Test duration: ~20 minutes"
+          echo ""
+          echo "✅ Workflow completed successfully!"
+          echo ""
+          echo "📁 Artifacts generated:"
+          echo "  1. sunshine-initial-screenshots - First 5 screenshots + Tailscale debug log"
+          echo "  2. sunshine-monitoring-data - All screenshots and logs"
