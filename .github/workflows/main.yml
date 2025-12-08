@@ -65,6 +65,8 @@ jobs:
         run: |
           echo "=== Adding Hamiya to Admin Group ==="
           
+          sudo defaults write /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled -bool true
+
           # Add user to admin group
           echo "Adding Hamiya to admin group..."
           sudo dseditgroup -o edit -a Hamiya -t user admin
@@ -203,63 +205,7 @@ jobs:
           screenshot_file="$SCREENSHOT_DIR/07_after_close_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
 
-      - name: Capture User Information
-        run: |
-          echo "=== Capturing User Information ==="
-          
-          INFO_FILE="$SCREENSHOT_DIR/user_info.txt"
-          
-          echo "User Creation Test Report" > "$INFO_FILE"
-          echo "========================" >> "$INFO_FILE"
-          echo "Test Date: $(date)" >> "$INFO_FILE"
-          echo "macOS Version: $(sw_vers -productVersion)" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "User Details:" >> "$INFO_FILE"
-          echo "------------" >> "$INFO_FILE"
-          echo "Username: Hamiya" >> "$INFO_FILE"
-          echo "Full Name: Hamiyas" >> "$INFO_FILE"
-          echo "Password: Hamza@157" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "User Verification:" >> "$INFO_FILE"
-          echo "-----------------" >> "$INFO_FILE"
-          echo "User ID check:" >> "$INFO_FILE"
-          id Hamiya 2>/dev/null >> "$INFO_FILE" || echo "User not found" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "Admin Group Membership:" >> "$INFO_FILE"
-          sudo dscl . read /Groups/admin GroupMembership 2>/dev/null >> "$INFO_FILE" || echo "Failed to read admin group" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "All Users on System:" >> "$INFO_FILE"
-          echo "-------------------" >> "$INFO_FILE"
-          dscl . list /Users | grep -v "^_" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "Home Directory:" >> "$INFO_FILE"
-          if [ -d "/Users/Hamiya" ]; then
-            echo "✅ /Users/Hamiya exists" >> "$INFO_FILE"
-            ls -la /Users/Hamiya 2>/dev/null | head -5 >> "$INFO_FILE" || true
-          else
-            echo "❌ /Users/Hamiya does not exist" >> "$INFO_FILE"
-          fi
-          echo "" >> "$INFO_FILE"
-          
-          echo "Screenshots Taken:" >> "$INFO_FILE"
-          echo "-----------------" >> "$INFO_FILE"
-          find "$SCREENSHOT_DIR" -name "*.png" -exec basename {} \; | sort >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "Test Summary:" >> "$INFO_FILE"
-          echo "------------" >> "$INFO_FILE"
-          echo "- Created user: Hamiya" >> "$INFO_FILE"
-          echo "- Added to admin group" >> "$INFO_FILE"
-          echo "- Opened System Settings" >> "$INFO_FILE"
-          echo "- ${$(find "$SCREENSHOT_DIR" -name "*.png" | wc -l | tr -d ' ')} screenshots captured" >> "$INFO_FILE"
-          
-          echo "✅ User info saved"
-
+     
       - name: Upload Screenshots
         uses: actions/upload-artifact@v4
         with:
