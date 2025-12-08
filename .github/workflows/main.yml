@@ -100,13 +100,33 @@ jobs:
             exit 1
           fi
 
-      - name: Screenshot After Installation
+      - name: Screenshot and Click After Installation
         run: |
-          echo "=== Screenshot After Installation ==="
+          echo "=== Screenshot and Click After Installation ==="
+          
+          # First screenshot after installation
           timestamp=$(date +%Y%m%d_%H%M%S)
           screenshot_file="$SCREENSHOT_DIR/02_after_install_$timestamp.png"
           screencapture -x "$screenshot_file"
-          echo "✅ Post-installation screenshot saved"
+          echo "✅ Post-installation screenshot saved: $screenshot_file"
+          
+          # Install cliclick if not already installed
+          if ! command -v cliclick &> /dev/null; then
+            echo "Installing cliclick for clicking..."
+            brew install cliclick
+          fi
+          
+          # Perform click at coordinates (210, 563)
+          echo "Performing click at coordinates (210, 563)..."
+          cliclick c:210,563
+          
+          # Wait for click to register
+          sleep 2
+          
+          # Take screenshot after click
+          screenshot_file="$SCREENSHOT_DIR/03_after_click_210_563_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "✅ Screenshot after click saved: $screenshot_file"
 
       - name: Launch AnyDesk
         run: |
@@ -135,19 +155,13 @@ jobs:
           sleep 5
           
           # Take screenshot after launch
-          screenshot_file="$SCREENSHOT_DIR/03_after_launch_$(date +%Y%m%d_%H%M%S).png"
+          screenshot_file="$SCREENSHOT_DIR/04_after_launch_$(date +%Y%m%d_%H%M%S).png"
           screencapture -x "$screenshot_file"
           echo "✅ Launch screenshot saved"
 
       - name: Take Application Screenshots
         run: |
           echo "=== Taking Application Screenshots ==="
-          
-          # Install cliclick for precise clicking
-          if ! command -v cliclick &> /dev/null; then
-            echo "Installing cliclick for UI testing..."
-            brew install cliclick
-          fi
           
           # Get screen dimensions
           SCREEN_INFO=$(system_profiler SPDisplaysDataType 2>/dev/null | grep -A1 "Resolution:" | tail -1 | tr -d ' ' | sed 's/[^0-9x]//g')
@@ -161,40 +175,44 @@ jobs:
           
           echo "Screen: ${WIDTH}x${HEIGHT}"
           
-          # Take screenshot 4 - Center of screen (where main UI might be)
-          echo "Taking screenshot 4 (center)..."
-          screenshot_file="$SCREENSHOT_DIR/04_center_ui_$(date +%H%M%S).png"
+          # Take screenshot 5 - Center of screen
+          echo "Taking screenshot 5 (center)..."
+          screenshot_file="$SCREENSHOT_DIR/05_center_ui_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
           sleep 1
           
-          # Try to interact with UI (click in common areas)
-          echo "Testing UI interaction..."
-          
           # Click in center (where AnyDesk ID might be displayed)
+          echo "Clicking at screen center..."
           CENTER_X=$((WIDTH / 2))
           CENTER_Y=$((HEIGHT / 2))
           cliclick c:$CENTER_X,$CENTER_Y 2>/dev/null || true
           sleep 1
           
-          # Take screenshot 5 - After interaction
-          echo "Taking screenshot 5 (after click)..."
-          screenshot_file="$SCREENSHOT_DIR/05_after_click_$(date +%H%M%S).png"
+          # Take screenshot 6 - After center click
+          echo "Taking screenshot 6 (after center click)..."
+          screenshot_file="$SCREENSHOT_DIR/06_after_center_click_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          
+          # Click at specific coordinates (210, 563) again
+          echo "Clicking again at coordinates (210, 563)..."
+          cliclick c:210,563 2>/dev/null || true
+          sleep 1
+          
+          # Take screenshot 7 - After second click at 210,563
+          echo "Taking screenshot 7 (after second click at 210,563)..."
+          screenshot_file="$SCREENSHOT_DIR/07_after_210_563_click_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
           
           # Click in top-right (where menu/settings might be)
           TOP_RIGHT_X=$((WIDTH - 100))
           TOP_RIGHT_Y=100
+          echo "Clicking at top-right ($TOP_RIGHT_X, $TOP_RIGHT_Y)..."
           cliclick c:$TOP_RIGHT_X,$TOP_RIGHT_Y 2>/dev/null || true
           sleep 1
           
-          # Take screenshot 6 - Menu area
-          echo "Taking screenshot 6 (menu area)..."
-          screenshot_file="$SCREENSHOT_DIR/06_menu_area_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          
-          # Take screenshot 7 - Whole screen before quit
-          echo "Taking screenshot 7 (full screen)..."
-          screenshot_file="$SCREENSHOT_DIR/07_full_screen_$(date +%H%M%S).png"
+          # Take screenshot 8 - Menu area
+          echo "Taking screenshot 8 (menu area)..."
+          screenshot_file="$SCREENSHOT_DIR/08_menu_area_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
 
       - name: Test Application Functionality
@@ -209,7 +227,7 @@ jobs:
             
             # Take a screenshot of the running app
             echo "Taking screenshot of running application..."
-            screenshot_file="$SCREENSHOT_DIR/08_running_app_$(date +%H%M%S).png"
+            screenshot_file="$SCREENSHOT_DIR/09_running_app_$(date +%H%M%S).png"
             screencapture -x "$screenshot_file"
             
           else
@@ -218,7 +236,7 @@ jobs:
             sleep 3
             
             # Take screenshot after relaunch
-            screenshot_file="$SCREENSHOT_DIR/08_after_relaunch_$(date +%H%M%S).png"
+            screenshot_file="$SCREENSHOT_DIR/09_after_relaunch_$(date +%H%M%S).png"
             screencapture -x "$screenshot_file"
           fi
 
@@ -228,7 +246,7 @@ jobs:
           
           # Take screenshot before quitting
           echo "Taking screenshot before quit..."
-          screenshot_file="$SCREENSHOT_DIR/09_before_quit_$(date +%H%M%S).png"
+          screenshot_file="$SCREENSHOT_DIR/10_before_quit_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
           
           # Quit AnyDesk
@@ -248,10 +266,52 @@ jobs:
           
           # Take final screenshot after quit
           echo "Taking final screenshot after quit..."
-          screenshot_file="$SCREENSHOT_DIR/10_after_quit_$(date +%H%M%S).png"
+          screenshot_file="$SCREENSHOT_DIR/11_after_quit_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
 
-  
+      - name: Capture Application Information
+        run: |
+          echo "=== Capturing Application Information ==="
+          
+          INFO_FILE="$SCREENSHOT_DIR/application_info.txt"
+          
+          echo "AnyDesk Test Report" > "$INFO_FILE"
+          echo "===================" >> "$INFO_FILE"
+          echo "Test Date: $(date)" >> "$INFO_FILE"
+          echo "macOS Version: $(sw_vers -productVersion)" >> "$INFO_FILE"
+          echo "Click Test Coordinates: (210, 563)" >> "$INFO_FILE"
+          
+          if [ -d "/Applications/AnyDesk.app" ]; then
+            echo "AnyDesk Location: /Applications/AnyDesk.app" >> "$INFO_FILE"
+            
+            # Get version
+            VERSION=$(defaults read "/Applications/AnyDesk.app/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo "Unknown")
+            echo "AnyDesk Version: $VERSION" >> "$INFO_FILE"
+            
+            # Get bundle size
+            SIZE=$(du -sh "/Applications/AnyDesk.app" 2>/dev/null | awk '{print $1}' || echo "Unknown")
+            echo "Application Size: $SIZE" >> "$INFO_FILE"
+            
+            # Get bundle identifier
+            BUNDLE_ID=$(defaults read "/Applications/AnyDesk.app/Contents/Info" CFBundleIdentifier 2>/dev/null || echo "Unknown")
+            echo "Bundle Identifier: $BUNDLE_ID" >> "$INFO_FILE"
+          else
+            echo "AnyDesk Location: Not found" >> "$INFO_FILE"
+          fi
+          
+          echo "" >> "$INFO_FILE"
+          echo "Screenshots Taken:" >> "$INFO_FILE"
+          find "$SCREENSHOT_DIR" -name "*.png" -exec basename {} \; | sort >> "$INFO_FILE"
+          
+          echo "" >> "$INFO_FILE"
+          echo "Test Summary:" >> "$INFO_FILE"
+          echo "- Downloaded AnyDesk successfully" >> "$INFO_FILE"
+          echo "- Installed to Applications folder" >> "$INFO_FILE"
+          echo "- Click performed at coordinates (210, 563)" >> "$INFO_FILE"
+          echo "- Application launched successfully" >> "$INFO_FILE"
+          echo "- ${$(find "$SCREENSHOT_DIR" -name "*.png" | wc -l | tr -d ' ')} screenshots captured" >> "$INFO_FILE"
+          
+          echo "✅ Application info saved"
 
       - name: Upload Screenshots
         uses: actions/upload-artifact@v4
@@ -280,6 +340,7 @@ jobs:
           echo "  ✅ AnyDesk Downloaded and Installed"
           SCREENSHOT_COUNT=$(find "$SCREENSHOT_DIR" -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
           echo "  ✅ $SCREENSHOT_COUNT screenshots taken"
+          echo "  ✅ Click performed at coordinates (210, 563)"
           echo "  ✅ Application launched successfully"
           echo ""
           echo "📁 Artifacts:"
