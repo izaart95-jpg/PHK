@@ -177,41 +177,52 @@ jobs:
           screencapture -x "$screenshot_file"
           echo "📸 Screenshot of search results saved"
 
-      - name: Click at 256,242 after Search
+      - name: Click at 256,242 and 827,202
         run: |
-          echo "=== Clicking at coordinates (256, 242) after search ==="
+          echo "=== Clicking at coordinates (256, 242) and (827, 202) ==="
           
-          # Wait a moment for search results to stabilize
+          # Wait for search results to stabilize
           sleep 2
           
-          # Take screenshot before clicking at 256,242
+          # Take screenshot before first click
           screenshot_file="$SCREENSHOT_DIR/08_before_click_256_242_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
-          echo "📸 Screenshot before click at 256,242 saved"
+          echo "📸 Screenshot before first click saved"
           
           # Click at coordinates (256, 242)
           echo "Clicking at coordinates (256, 242)..."
           cliclick c:256,242
           
-          echo "✅ Click performed at (256, 242)"
+          echo "✅ First click performed at (256, 242)"
           
-          # Wait for action to complete
+          # Wait for action
           sleep 2
           
-          # Take screenshot after click
+          # Take screenshot after first click
           screenshot_file="$SCREENSHOT_DIR/09_after_click_256_242_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
-          echo "📸 Screenshot after click at 256,242 saved"
+          echo "📸 Screenshot after first click saved"
+          
+          # Click at coordinates (827, 202)
+          echo "Clicking at coordinates (827, 202)..."
+          cliclick c:827,202
+          
+          echo "✅ Second click performed at (827, 202)"
+          
+          # Wait for action
+          sleep 2
+          
+          # Take screenshot after second click
+          screenshot_file="$SCREENSHOT_DIR/10_after_click_827_202_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot after second click saved"
 
       - name: Final Task - Click at 26,8 and Screenshot
         run: |
           echo "=== Final Task: Click at (26, 8) ==="
           
-          # Wait a moment before final action
-          sleep 2
-          
           # Take screenshot before final click
-          screenshot_file="$SCREENSHOT_DIR/10_before_final_click_26_8_$(date +%H%M%S).png"
+          screenshot_file="$SCREENSHOT_DIR/11_before_final_click_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
           echo "📸 Screenshot before final click saved"
           
@@ -225,7 +236,7 @@ jobs:
           sleep 2
           
           # Take final screenshot
-          screenshot_file="$SCREENSHOT_DIR/11_after_final_click_26_8_$(date +%H%M%S).png"
+          screenshot_file="$SCREENSHOT_DIR/12_after_final_click_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
           echo "📸 Final screenshot saved"
 
@@ -272,15 +283,17 @@ jobs:
           echo "3. Opened System Settings" >> "$INFO_FILE"
           echo "4. Clicked at coordinates (507, 363)" >> "$INFO_FILE"
           echo "5. Searched for 'Fast User Switching'" >> "$INFO_FILE"
-          echo "6. Clicked at coordinates (256, 242) after search" >> "$INFO_FILE"
-          echo "7. Clicked at coordinates (26, 8) as final task" >> "$INFO_FILE"
+          echo "6. Clicked at coordinates (256, 242)" >> "$INFO_FILE"
+          echo "7. Clicked at coordinates (827, 202)" >> "$INFO_FILE"
+          echo "8. Clicked at coordinates (26, 8)" >> "$INFO_FILE"
           echo "" >> "$INFO_FILE"
           
-          echo "Click Coordinates Summary:" >> "$INFO_FILE"
-          echo "------------------------" >> "$INFO_FILE"
-          echo "• (507, 363) - Initial click in System Settings" >> "$INFO_FILE"
-          echo "• (256, 242) - Click after search results (likely Fast User Switching option)" >> "$INFO_FILE"
-          echo "• (26, 8)    - Final click (likely top-left corner/close button)" >> "$INFO_FILE"
+          echo "Click Sequence Log:" >> "$INFO_FILE"
+          echo "------------------" >> "$INFO_FILE"
+          echo "1. (507, 363) - Initial click in System Settings" >> "$INFO_FILE"
+          echo "2. (256, 242) - First click after search" >> "$INFO_FILE"
+          echo "3. (827, 202) - Second click after search" >> "$INFO_FILE"
+          echo "4. (26, 8) - Final click (likely top-left corner)" >> "$INFO_FILE"
           echo "" >> "$INFO_FILE"
           
           echo "Screenshots Captured:" >> "$INFO_FILE"
@@ -298,7 +311,7 @@ jobs:
           pkill -f "System Settings" 2>/dev/null || true
           
           # Take one final desktop screenshot
-          screenshot_file="$SCREENSHOT_DIR/12_final_desktop_$(date +%H%M%S).png"
+          screenshot_file="$SCREENSHOT_DIR/13_final_desktop_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
           echo "📸 Final desktop screenshot saved"
 
@@ -333,21 +346,20 @@ jobs:
           echo "  ✅ All clicks performed at specified coordinates"
           echo ""
           echo "🎯 Test Tasks Completed:"
-          echo "  1. sudo defaults write /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled -bool true"
-          echo "  2. sudo defaults write /Library/Preferences/com.apple.loginwindow MultipleSessionName -string 'FullName'"
-          echo "  3. sudo sysadminctl -addUser Hamiya -fullName 'Hamiyas' -password Hamza@157"
-          echo "  4. sudo dseditgroup -o edit -a Hamiya -t user admin"
-          echo "  5. dscl . read /Groups/admin GroupMembership"
-          echo "  6. Opened System Settings"
-          echo "  7. Clicked at (507, 363)"
-          echo "  8. Searched for 'Fast User Switching'"
-          echo "  9. Clicked at (256, 242) after search"
-          echo "  10. Clicked at (26, 8) as final task"
+          echo "  1. Enabled MultipleSessionEnabled and MultipleSessionName"
+          echo "  2. Created admin user 'Hamiya'"
+          echo "  3. Opened System Settings"
+          echo "  4. Clicked at (507, 363)"
+          echo "  5. Searched for 'Fast User Switching'"
+          echo "  6. Clicked at (256, 242)"
+          echo "  7. Clicked at (827, 202)"
+          echo "  8. Clicked at (26, 8) - Final task"
           echo ""
-          echo "📍 Click Coordinates:"
-          echo "  • (507, 363) - Initial System Settings click"
-          echo "  • (256, 242) - Click on Fast User Switching option"
-          echo "  • (26, 8)    - Final click (top-left corner)"
+          echo "📍 Click Sequence Completed:"
+          echo "  • (507, 363) - Initial System Settings interaction"
+          echo "  • (256, 242) - First post-search click"
+          echo "  • (827, 202) - Second post-search click"
+          echo "  • (26, 8) - Final click (top-left corner)"
           echo ""
           echo "📁 Artifacts:"
           echo "  • Screenshots uploaded as 'macos-user-management-screenshots'"
