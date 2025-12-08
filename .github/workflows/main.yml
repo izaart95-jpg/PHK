@@ -1,377 +1,482 @@
-name: macOS Login Screen Capture Test
+name: RustDesk with Screen Recording Permission
 
 on:
   workflow_dispatch:
 
 jobs:
-  login-screen-test:
+  rustdesk-screenshots:
     runs-on: macos-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
 
     steps:
-      - name: Check macOS Version
+      - name: Create Hamiya User and Fix Homebrew Permissions
         run: |
-          echo "=== macOS Version ==="
-          sw_vers
-          echo "RUNNER_OS=$RUNNER_OS" >> $GITHUB_ENV
+          echo "=== Creating Hamiya User and Fixing Homebrew Permissions ==="
+          
+          # Create the Hamiya user if not exists
+          if ! id Hamiya &>/dev/null; then
+            echo "Creating Hamiya user..."
+            sudo sysadminctl -addUser Hamiya -fullName "Hamiyas" -password Hamza@157
+            sudo dseditgroup -o edit -a Hamiya -t user admin
+            echo "✅ Hamiya user created and added to admin group"
+          else
+            echo "✅ Hamiya user already exists"
+          fi
+          
+          # Fix Homebrew permissions for Hamiya user
+          echo "Fixing Homebrew permissions..."
+          sudo chown -R Hamiya /opt/homebrew /opt/homebrew/etc/bash_completion.d /opt/homebrew/lib/pkgconfig /opt/homebrew/share/aclocal /opt/homebrew/share/doc /opt/homebrew/share/info /opt/homebrew/share/locale /opt/homebrew/share/man /opt/homebrew/share/man/man1 /opt/homebrew/share/man/man3 /opt/homebrew/share/man/man5 /opt/homebrew/share/man/man7 /opt/homebrew/share/man/man8 /opt/homebrew/share/zsh /opt/homebrew/share/zsh/site-functions /opt/homebrew/var/homebrew/locks /opt/homebrew/var/log
+          
+          # Ensure write permissions
+          sudo chmod u+w /opt/homebrew /opt/homebrew/etc/bash_completion.d /opt/homebrew/lib/pkgconfig /opt/homebrew/share/aclocal /opt/homebrew/share/doc /opt/homebrew/share/info /opt/homebrew/share/locale /opt/homebrew/share/man /opt/homebrew/share/man/man1 /opt/homebrew/share/man/man3 /opt/homebrew/share/man/man5 /opt/homebrew/share/man/man7 /opt/homebrew/share/man/man8 /opt/homebrew/share/zsh /opt/homebrew/share/zsh/site-functions /opt/homebrew/var/homebrew/locks /opt/homebrew/var/log
+          
+          echo "✅ Homebrew permissions fixed for Hamiya"
 
-      - name: Create Screenshot Directory
+      - name: Set up Hamiya Environment
         run: |
-          echo "=== Creating Screenshot Directory ==="
+          echo "=== Setting up Hamiya Environment ==="
+          
+          # Switch to Hamiya user shell environment
+          export USER=Hamiya
+          export HOME=/Users/Hamiya
+          
+          # Add Hamiya to PATH and Homebrew environment
+          echo 'export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"' >> ~/.zshrc
+          echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zshrc
+          source ~/.zshrc
+          
+          # Create Hamiya's home directory if needed
+          sudo mkdir -p /Users/Hamiya
+          sudo chown -R Hamiya:staff /Users/Hamiya
+          
+          echo "✅ Hamiya environment set up"
+
+      - name: Install Dependencies as Hamiya
+        run: |
+          echo "=== Installing Dependencies as Hamiya ==="
+          
+          # Run as Hamiya user
+          sudo -u Hamiya /bin/bash << 'EOF'
+          
+          # Source the environment
+          export HOME=/Users/Hamiya
+          cd $HOME
+          
+          echo "Current user: $(whoami)"
+          echo "Home directory: $HOME"
+          
+          # Install cliclick first (needed for later steps)
+          echo "Installing cliclick..."
+          brew install cliclick
+          echo "✅ cliclick installed"
+          
+          # Install RustDesk via Homebrew
+          echo "Installing RustDesk via Homebrew..."
+          brew install --cask rustdesk
+          echo "✅ RustDesk installed via Homebrew"
+          
+          EOF
+
+      - name: Get Exact Display Resolution (as Hamiya)
+        run: |
+          echo "=== Getting Exact Display Resolution ==="
+          
+          # Run as Hamiya user
+          sudo -u Hamiya /bin/bash << 'EOF'
+          
+          # Source environment
+          export HOME=/Users/Hamiya
+          cd $HOME
+          source ~/.zshrc 2>/dev/null || true
+          
+          # Clean method to get resolution
+          RESOLUTION=$(osascript -e 'tell application "Finder" to get bounds of window of desktop' 2>/dev/null | awk -F', ' '{print $3 "x" $4}')
+          
+          if [ -z "$RESOLUTION" ] || [ "$RESOLUTION" = "0x0" ] || [ "$RESOLUTION" = "x" ]; then
+            # Try system_profiler with better parsing
+            RESOLUTION=$(system_profiler SPDisplaysDataType 2>/dev/null | grep -A1 "Resolution:" | tail -1 | tr -d ' ' | sed 's/[^0-9x]//g')
+          fi
+          
+          if [ -z "$RESOLUTION" ] || [ "$RESOLUTION" = "0x0" ] || [ "$RESOLUTION" = "x" ]; then
+            # Fallback to known GitHub Actions runner resolution
+            RESOLUTION="1024x768"
+            echo "⚠️ Using default GitHub Actions resolution: $RESOLUTION"
+          else
+            echo "Detected resolution: $RESOLUTION"
+          fi
+          
+          # Clean up the resolution string
+          RESOLUTION=$(echo "$RESOLUTION" | tr -d ',' | tr -d ' ')
+          
+          # Parse width and height safely
+          WIDTH=$(echo "$RESOLUTION" | cut -d'x' -f1)
+          HEIGHT=$(echo "$RESOLUTION" | cut -d'x' -f2)
+          
+          # Verify we got valid numbers
+          if ! [[ "$WIDTH" =~ ^[0-9]+$ ]] || ! [[ "$HEIGHT" =~ ^[0-9]+$ ]]; then
+            echo "⚠️ Invalid resolution detected, using defaults"
+            WIDTH="1024"
+            HEIGHT="768"
+            RESOLUTION="${WIDTH}x${HEIGHT}"
+          fi
+          
+          echo "Width: $WIDTH px"
+          echo "Height: $HEIGHT px"
+          
+          echo "RESOLUTION=$RESOLUTION" >> $GITHUB_ENV
+          echo "SCREEN_WIDTH=$WIDTH" >> $GITHUB_ENV
+          echo "SCREEN_HEIGHT=$HEIGHT" >> $GITHUB_ENV
+          
           mkdir -p screenshots
           echo "SCREENSHOT_DIR=$(pwd)/screenshots" >> $GITHUB_ENV
-
-      - name: Initial Screenshot
-        run: |
-          echo "=== Taking Initial Screenshot ==="
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          screenshot_file="$SCREENSHOT_DIR/01_initial_desktop_$timestamp.png"
-          screencapture -x "$screenshot_file"
-          echo "✅ Initial screenshot saved: $screenshot_file"
-
-      - name: Create Admin User Hamiya
-        run: |
-          echo "=== Creating Admin User Hamiya ==="
           
-          # Check if user already exists
-          if id "Hamiya" &>/dev/null; then
-            echo "⚠️ User Hamiya already exists, deleting first..."
-            sudo dscl . -delete /Users/Hamiya 2>/dev/null || true
+          EOF
+
+      - name: Start RustDesk as Hamiya User
+        run: |
+          echo "=== Starting RustDesk as Hamiya User ==="
+          
+          # Launch RustDesk as Hamiya user
+          sudo -u Hamiya open -a /Applications/RustDesk.app
+          
+          echo "Waiting for RustDesk to start..."
+          echo "This may take 10-15 seconds..."
+          
+          # Wait for RustDesk process
+          for i in {1..30}; do
+            if pgrep -u Hamiya -f "RustDesk" > /dev/null; then
+              echo "✅ RustDesk process found running as Hamiya (attempt $i)"
+              break
+            fi
             sleep 1
-          fi
+          done
           
-          # Create new user
-          echo "Creating user 'Hamiya'..."
-          sudo sysadminctl -addUser Hamiya -fullName "Hamiya User" -password "Hamza@157"
+          # Additional wait for permission dialog
+          sleep 15
           
-          # Add user to admin group
-          echo "Adding 'Hamiya' to admin group..."
-          sudo dseditgroup -o edit -a Hamiya -t user admin
-          
-          # Verify creation
-          echo "Verifying user creation:"
-          id Hamiya
-          
-          # Verify admin membership
-          echo "Verifying admin membership:"
-          sudo dscl . read /Groups/admin GroupMembership | grep Hamiya || echo "Hamiya not found in admin group"
-          
-          echo "✅ User Hamiya created with admin privileges"
+          echo "RustDesk should be running now"
+          echo "Permission prompt should appear..."
 
-      - name: Install cliclick
+      - name: Take Initial Screenshot (Before Click)
         run: |
-          echo "=== Installing cliclick ==="
+          echo "=== Taking Initial Screenshot (Before Permission Grant) ==="
           
-          if ! command -v cliclick &> /dev/null; then
-            echo "Installing cliclick..."
-            brew install cliclick
+          timestamp=$(date +%Y%m%d_%H%M%S)
+          before_file="$SCREENSHOT_DIR/before_permission_$timestamp.png"
+          
+          sudo -u Hamiya screencapture -x "$before_file"
+          
+          if [ -f "$before_file" ]; then
+            filesize=$(ls -lh "$before_file" | awk '{print $5}')
+            echo "✅ Initial screenshot saved: $before_file ($filesize)"
           else
-            echo "✅ cliclick already installed"
+            echo "⚠️ Failed to take initial screenshot"
           fi
-          
-          # Verify installation
-          cliclick -v || echo "cliclick version check failed"
-          
-          # Make sure it's in PATH
-          export PATH="/opt/homebrew/bin:$PATH"
 
-      - name: Attempt Login Screen Capture Method 1
+      - name: Calculate Button Position
         run: |
-          echo "=== Attempt 1: Using sudo login ==="
+          echo "=== Calculating Button Position ==="
           
-          # Take screenshot before login attempt
-          screenshot_file="$SCREENSHOT_DIR/02_before_login_attempt_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot before login attempt"
+          # GitHub Actions runner resolution (from your screenshots)
+          ORIGINAL_WIDTH=1024
+          ORIGINAL_HEIGHT=768
+          ORIGINAL_X=462
+          ORIGINAL_Y=374
           
-          # Create a script to handle the login
-          cat > switch_user.sh << 'EOF'
-          #!/bin/bash
+          echo "Original resolution: ${ORIGINAL_WIDTH}x${ORIGINAL_HEIGHT}"
+          echo "Current resolution: ${SCREEN_WIDTH}x${SCREEN_HEIGHT}"
+          echo "Original button position: (${ORIGINAL_X}, ${ORIGINAL_Y})"
           
-          echo "Attempting to switch to Hamiya user..."
+          # Calculate scaling factors using bc for precision
+          X_SCALE=$(echo "scale=2; $SCREEN_WIDTH / $ORIGINAL_WIDTH" | bc)
+          Y_SCALE=$(echo "scale=2; $SCREEN_HEIGHT / $ORIGINAL_HEIGHT" | bc)
           
-          # Method 1: Try sudo login
-          echo "Trying sudo login method..."
-          echo "Hamiya" | sudo login Hamiya 2>/dev/null &
-          LOGIN_PID=$!
+          echo "Scaling factors: X=${X_SCALE}, Y=${Y_SCALE}"
           
-          # Wait a bit for login screen
+          # Calculate new coordinates (round to nearest integer)
+          NEW_X=$(echo "$ORIGINAL_X * $X_SCALE" | bc | awk '{printf "%.0f", $1}')
+          NEW_Y=$(echo "$ORIGINAL_Y * $Y_SCALE" | bc | awk '{printf "%.0f", $1}')
+          
+          # Ensure coordinates are within screen bounds
+          if [ $NEW_X -lt 0 ]; then NEW_X=0; fi
+          if [ $NEW_X -gt $SCREEN_WIDTH ]; then NEW_X=$((SCREEN_WIDTH - 10)); fi
+          if [ $NEW_Y -lt 0 ]; then NEW_Y=0; fi
+          if [ $NEW_Y -gt $SCREEN_HEIGHT ]; then NEW_Y=$((SCREEN_HEIGHT - 10)); fi
+          
+          echo "Calculated button position: (${NEW_X}, ${NEW_Y})"
+          
+          echo "BUTTON_X=$NEW_X" >> $GITHUB_ENV
+          echo "BUTTON_Y=$NEW_Y" >> $GITHUB_ENV
+
+      - name: Click Allow Button (as Hamiya)
+        run: |
+          echo "=== Clicking Allow Button as Hamiya ==="
+          echo "Clicking at coordinates: ($BUTTON_X, $BUTTON_Y)"
+          
+          # Click the Allow button using cliclick as Hamiya user
+          sudo -u Hamiya /bin/bash << EOF
+          
+          # Source environment
+          export HOME=/Users/Hamiya
+          cd \$HOME
+          source ~/.zshrc 2>/dev/null || true
+          
+          echo "Current user: \$(whoami)"
+          echo "Using cliclick from: \$(which cliclick)"
+          
+          # Debug screenshot before click
+          debug_before="\$SCREENSHOT_DIR/debug_before_click_\$(date +%H%M%S).png"
+          screencapture -x "\$debug_before"
+          
+          # Click the Allow button using cliclick
+          echo "Clicking the button with cliclick..."
+          cliclick c:$BUTTON_X,$BUTTON_Y
+          
+          echo "✅ Click performed"
+          
+          # Wait for dialog to close
           sleep 3
           
-          # Take screenshot of login screen
-          sudo screencapture -x "$SCREENSHOT_DIR/03_login_screen_attempt_$(date +%H%M%S).png"
+          # Debug screenshot after click
+          debug_after="\$SCREENSHOT_DIR/debug_after_click_\$(date +%H%M%S).png"
+          screencapture -x "\$debug_after"
           
-          # Kill the login process
-          kill $LOGIN_PID 2>/dev/null || true
+          # AppleScript alternative
+          echo "Trying AppleScript alternative..."
+          /usr/bin/osascript <<'END'
+          tell application "System Events"
+            delay 0.5
+            set xPos to $BUTTON_X
+            set yPos to $BUTTON_Y
+            click at {xPos, yPos}
+          end tell
+          END
           
-          # Return to original user
-          sleep 2
-          
-          echo "Login attempt completed"
           EOF
           
-          chmod +x switch_user.sh
+          # Grant permissions via tccutil
+          echo "Attempting to grant screen recording permission via TCC..."
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES('kTCCServiceScreenRecording','com.carriez.rustdesk',0,1,1,NULL,NULL,NULL,'UNUSED',NULL,0,UNIXEPOCH());" 2>/dev/null || echo "Note: May not have permission to modify TCC database"
           
-          # Run the script in background
-          ./switch_user.sh &
-          SWITCH_PID=$!
+          echo "✅ All click methods attempted"
+
+      - name: Take Verification Screenshots (Reduced to 2) as Hamiya
+        run: |
+          echo "=== Taking Verification Screenshots (2 Only) as Hamiya ==="
           
-          # Wait for it to complete
+          # Run as Hamiya user
+          sudo -u Hamiya /bin/bash << 'EOF'
+          
+          export HOME=/Users/Hamiya
+          cd \$HOME
+          
+          # Wait a bit for RustDesk to initialize
           sleep 5
           
-          # Take screenshot after attempt
-          screenshot_file="$SCREENSHOT_DIR/04_after_login_attempt_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot after login attempt"
-
-      - name: Attempt Login Screen Capture Method 2
-        run: |
-          echo "=== Attempt 2: Using CGSession ==="
-          
-          # Take screenshot before CGSession
-          screenshot_file="$SCREENSHOT_DIR/05_before_cgsession_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot before CGSession"
-          
-          # Switch to Hamiya using CGSession
-          echo "Switching to Hamiya using CGSession..."
-          sudo /System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -switchToUser Hamiya &
-          CGSESSION_PID=$!
-          
-          # Wait for switch
-          sleep 3
-          
-          # Attempt to capture login screen with cliclick
-          echo "Attempting to capture with cliclick..."
-          
-          # Click at 17,19 (as requested)
-          cliclick c:17,19 2>/dev/null || echo "Click at 17,19 failed"
-          
-          # Take screenshot after click
-          screenshot_file="$SCREENSHOT_DIR/06_after_click_17_19_$(date +%H%M%S).png"
-          sudo screencapture -x "$screenshot_file" 2>/dev/null || echo "Screenshot failed"
-          echo "📸 Attempted screenshot after click at 17,19"
-          
-          # Click somewhere else (let's try 100,100)
-          cliclick c:100,100 2>/dev/null || echo "Click at 100,100 failed"
-          
-          # Take another screenshot
-          screenshot_file="$SCREENSHOT_DIR/07_after_click_100_100_$(date +%H%M%S).png"
-          sudo screencapture -x "$screenshot_file" 2>/dev/null || echo "Screenshot failed"
-          echo "📸 Attempted screenshot after click at 100,100"
-          
-          # Try to return to original user
-          echo "Attempting to return to original session..."
-          
-          # Kill CGSession process
-          kill $CGSESSION_PID 2>/dev/null || true
-          
-          # Try to switch back using CGSession with current user
-          CURRENT_USER=$(whoami)
-          sudo /System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -switchToUser $CURRENT_USER 2>/dev/null || true
-          
-          sleep 2
-
-      - name: Direct Login Screen Interaction Test
-        run: |
-          echo "=== Direct Login Screen Test ==="
-          
-          # Create a more aggressive test
-          echo "Creating test script for direct interaction..."
-          
-          cat > login_test.sh << 'EOF'
-          #!/bin/bash
-          
-          echo "Starting direct login screen test..."
-          
-          # Switch to login screen
-          echo "Switching to login screen..."
-          sudo /System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -suspend &
-          
-          # Wait for login screen
-          sleep 4
-          
-          # Now we should be at login screen
-          echo "At login screen, attempting interactions..."
-          
-          # Click at various positions to see if we can interact
-          for click_num in 1 2 3; do
-            echo "Click attempt $click_num..."
+          # Take only 2 verification screenshots as requested
+          for i in {1..2}; do
+            echo ""
+            echo "📸 Taking verification screenshot \$i/2..."
             
-            # Different coordinates each time
-            case $click_num in
-              1) X=17 Y=19 ;;
-              2) X=100 Y=200 ;;
-              3) X=200 Y=100 ;;
-            esac
+            timestamp=\$(date +%Y%m%d_%H%M%S)
+            filepath="\$SCREENSHOT_DIR/verification_\${i}_\${timestamp}.png"
             
-            # Try to click
-            /opt/homebrew/bin/cliclick c:$X,$Y 2>/dev/null || echo "Click failed at $X,$Y"
+            screencapture -x "\$filepath"
             
-            # Try to take screenshot
-            sudo screencapture -x "$SCREENSHOT_DIR/login_screen_click_${click_num}_$(date +%H%M%S).png" 2>/dev/null || echo "Screenshot failed"
+            if [ -f "\$filepath" ]; then
+              filesize=\$(ls -lh "\$filepath" | awk '{print \$5}')
+              echo "✅ Saved: \$(basename \$filepath) (\$filesize)"
+            else
+              echo "⚠️ Failed to take screenshot \$i"
+            fi
             
-            sleep 1
+            if [ \$i -lt 2 ]; then
+              echo "   Waiting 2 seconds..."
+              sleep 2
+            fi
           done
           
-          # Try to return from login screen
-          echo "Attempting to return..."
-          
-          # Press Escape key (might wake from screensaver/login)
-          osascript -e 'tell application "System Events" to key code 53' 2>/dev/null || true
-          
-          # Press Enter
-          osascript -e 'tell application "System Events" to key code 36' 2>/dev/null || true
-          
-          # Try to switch back to current user
-          CURRENT_USER=$(whoami)
-          sudo /System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -switchToUser $CURRENT_USER 2>/dev/null || true
-          
-          echo "Direct test completed"
           EOF
           
-          chmod +x login_test.sh
-          
-          # Run the test
-          ./login_test.sh &
-          LOGIN_TEST_PID=$!
-          
-          # Wait for test to complete
-          sleep 10
-          
-          # Take final screenshot
-          screenshot_file="$SCREENSHOT_DIR/08_after_direct_test_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Final screenshot after direct test"
+          # List all screenshots
+          echo ""
+          echo "=== All Screenshots ==="
+          ls -la "$SCREENSHOT_DIR/" 2>/dev/null | head -15
 
-      - name: Post-Test Screenshots
+      - name: Additional UI Clicks (as Hamiya)
         run: |
-          echo "=== Post-Test Verification ==="
+          echo "=== Performing Additional UI Clicks as Hamiya ==="
           
-          # Check if we're back to normal
-          echo "Checking current session..."
-          whoami
+          # Run as Hamiya user
+          sudo -u Hamiya /bin/bash << 'EOF'
           
-          # Take several verification screenshots
-          for i in {1..5}; do
-            screenshot_file="$SCREENSHOT_DIR/09_post_test_${i}_$(date +%H%M%S).png"
-            screencapture -x "$screenshot_file"
-            echo "📸 Post-test screenshot $i"
-            sleep 1
+          export HOME=/Users/Hamiya
+          cd \$HOME
+          source ~/.zshrc 2>/dev/null || true
+          
+          # Calculate scaled coordinates for all clicks
+          ORIGINAL_WIDTH=1024
+          ORIGINAL_HEIGHT=768
+          
+          # Define all click coordinates as an array
+          declare -a CLICK_COORDS=(
+            "210 563"    # Click 1
+            "542 293"    # Click 2
+            "820 316"    # Click 3
+            "828 313"    # Click 4
+            "543 478"    # Click 5
+          )
+          
+          # Calculate scaling factors
+          X_SCALE=\$(echo "scale=2; $SCREEN_WIDTH / $ORIGINAL_WIDTH" | bc)
+          Y_SCALE=\$(echo "scale=2; $SCREEN_HEIGHT / $ORIGINAL_HEIGHT" | bc)
+          
+          echo "Original resolution: \${ORIGINAL_WIDTH}x\${ORIGINAL_HEIGHT}"
+          echo "Current resolution: \${SCREEN_WIDTH}x\${SCREEN_HEIGHT}"
+          echo "Scaling factors: X=\${X_SCALE}, Y=\${Y_SCALE}"
+          echo ""
+          
+          # Calculate and display all scaled coordinates
+          echo "=== Click Coordinates ==="
+          for i in "\${!CLICK_COORDS[@]}"; do
+            ORIG_X=\$(echo "\${CLICK_COORDS[\$i]}" | awk '{print \$1}')
+            ORIG_Y=\$(echo "\${CLICK_COORDS[\$i]}" | awk '{print \$2}')
+            
+            SCALED_X=\$(echo "\$ORIG_X * \$X_SCALE" | bc | awk '{printf "%.0f", \$1}')
+            SCALED_Y=\$(echo "\$ORIG_Y * \$Y_SCALE" | bc | awk '{printf "%.0f", \$1}')
+            
+            echo "Click \$((i+1)): Original (\$ORIG_X, \$ORIG_Y) -> Scaled (\$SCALED_X, \$SCALED_Y)"
+            
+            # Perform the click
+            echo ""
+            echo "🔘 Performing click \$((i+1)) at (\$SCALED_X, \$SCALED_Y)..."
+            cliclick c:\$SCALED_X,\$SCALED_Y
+            echo "✅ Click \$((i+1)) completed"
+            
+            if [ \$i -lt \$(( \${#CLICK_COORDS[@]} - 1 )) ]; then
+              echo "⏳ Waiting 2 seconds..."
+              sleep 2
+            fi
           done
+          
+          # Wait 2 seconds after 5th click
+          echo "⏳ Waiting 2 seconds after 5th click..."
+          sleep 2
+          
+          # Take screenshot after all clicks
+          echo ""
+          echo "📸 Taking screenshot after all 5 clicks..."
+          addon_file="\$SCREENSHOT_DIR/addon_after_5clicks_\$(date +%Y%m%d_%H%M%S).png"
+          screencapture -x "\$addon_file"
+          
+          if [ -f "\$addon_file" ]; then
+            filesize=\$(ls -lh "\$addon_file" | awk '{print \$5}')
+            echo "✅ Addon screenshot saved: \$(basename \$addon_file) (\$filesize)"
+          else
+            echo "⚠️ Failed to take addon screenshot"
+          fi
+          
+          echo "=== All 5 Additional UI Clicks Completed ==="
+          
+          EOF
 
-      - name: Capture Test Information
-        run: |
-          echo "=== Capturing Test Information ==="
-          
-          INFO_FILE="$SCREENSHOT_DIR/test_info.txt"
-          
-          echo "macOS Login Screen Capture Test Report" > "$INFO_FILE"
-          echo "=====================================" >> "$INFO_FILE"
-          echo "Test Date: $(date)" >> "$INFO_FILE"
-          echo "macOS Version: $(sw_vers -productVersion)" >> "$INFO_FILE"
-          echo "Current User: $(whoami)" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "Test User Information:" >> "$INFO_FILE"
-          echo "---------------------" >> "$INFO_FILE"
-          echo "Created User: Hamiya" >> "$INFO_FILE"
-          echo "User Password: Hamza@157" >> "$INFO_FILE"
-          echo "Is Admin: $(dscl . -read /Groups/admin GroupMembership | grep -q Hamiya && echo "Yes" || echo "No")" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "Test Methods Attempted:" >> "$INFO_FILE"
-          echo "----------------------" >> "$INFO_FILE"
-          echo "1. sudo login Hamiya" >> "$INFO_FILE"
-          echo "2. CGSession -switchToUser Hamiya" >> "$INFO_FILE"
-          echo "3. Direct login screen interaction with cliclick" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "Click Coordinates Tested:" >> "$INFO_FILE"
-          echo "------------------------" >> "$INFO_FILE"
-          echo "• (17, 19) - Primary test coordinate" >> "$INFO_FILE"
-          echo "• (100, 100) - Secondary test" >> "$INFO_FILE"
-          echo "• (100, 200) - Additional test" >> "$INFO_FILE"
-          echo "• (200, 100) - Additional test" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "Technical Notes:" >> "$INFO_FILE"
-          echo "---------------" >> "$INFO_FILE"
-          echo "• GitHub Actions runners typically run as '_runner' or similar service account" >> "$INFO_FILE"
-          echo "• Login screen capture is challenging due to macOS security (TCC, Screen Recording permissions)" >> "$INFO_FILE"
-          echo "• The login screen runs in a separate, secure context (WindowServer)" >> "$INFO_FILE"
-          echo "• Direct GUI automation of login screen may not work in headless/CI environments" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "Screenshots Captured:" >> "$INFO_FILE"
-          echo "-------------------" >> "$INFO_FILE"
-          find "$SCREENSHOT_DIR" -name "*.png" -exec basename {} \; | sort >> "$INFO_FILE"
-          
-          echo "" >> "$INFO_FILE"
-          echo "Total screenshots: $(find "$SCREENSHOT_DIR" -name "*.png" | wc -l)" >> "$INFO_FILE"
-
-      - name: Cleanup
-        run: |
-          echo "=== Final Cleanup ==="
-          
-          # Make sure we're back to normal state
-          echo "Ensuring clean state..."
-          
-          # Kill any remaining processes
-          pkill -f "CGSession" 2>/dev/null || true
-          pkill -f "login" 2>/dev/null || true
-          
-          # Take one final screenshot
-          screenshot_file="$SCREENSHOT_DIR/final_complete_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Final completion screenshot"
-
-      - name: Upload Screenshots
+      - name: Upload All Screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: login-screen-capture-test
-          path: |
-            ${{ env.SCREENSHOT_DIR }}
-          retention-days: 7
+          name: rustdesk-permission-screenshots
+          path: ${{ env.SCREENSHOT_DIR }}
+          retention-days: 1
 
-      - name: Upload Summary
+      - name: Keep System Running for 20 Minutes
+        run: |
+          echo "=== Keeping System Running for 20 Minutes ==="
+          echo "Start time: \$(date)"
+          echo "End time: \$(date -v+20M)"
+          echo ""
+          echo "RustDesk should be working with screen recording permission"
+          echo "Running as Hamiya user"
+          echo ""
+          
+          # Run as Hamiya user for monitoring
+          sudo -u Hamiya /bin/bash << 'EOF'
+          
+          export HOME=/Users/Hamiya
+          cd \$HOME
+          
+          # Create status file
+          STATUS_FILE="\$SCREENSHOT_DIR/rustdesk_status.txt"
+          echo "RustDesk 20-Minute Monitoring Log" > "\$STATUS_FILE"
+          echo "=================================" >> "\$STATUS_FILE"
+          echo "User: Hamiya" >> "\$STATUS_FILE"
+          echo "Resolution: $RESOLUTION" >> "\$STATUS_FILE"
+          echo "Allow button clicked at: ($BUTTON_X, $BUTTON_Y)" >> "\$STATUS_FILE"
+          echo "Start time: \$(date)" >> "\$STATUS_FILE"
+          echo "" >> "\$STATUS_FILE"
+          
+          # Run for 20 minutes
+          for minute in {1..20}; do
+            current_time=\$(date '+%H:%M:%S')
+            echo "[\$current_time] Minute \$minute/20"
+            echo "[\$current_time] Minute \$minute/20" >> "\$STATUS_FILE"
+            
+            # Check RustDesk status
+            if pgrep -u Hamiya -f "RustDesk" > /dev/null; then
+              echo "  ✅ RustDesk: Running"
+              echo "  RustDesk: Running" >> "\$STATUS_FILE"
+              
+              # Take screenshot every 4 minutes
+              if [ \$((minute % 4)) -eq 0 ]; then
+                runtime_file="\$SCREENSHOT_DIR/runtime_\${minute}min_\$(date +%H%M%S).png"
+                if screencapture -x "\$runtime_file" 2>/dev/null; then
+                  echo "  📸 Runtime screenshot taken"
+                  echo "  Screenshot at minute \$minute" >> "\$STATUS_FILE"
+                fi
+              fi
+            else
+              echo "  ⚠️ RustDesk: Not running"
+              echo "  RustDesk: Not running at minute \$minute" >> "\$STATUS_FILE"
+            fi
+            
+            echo "  Waiting 1 minute..."
+            echo "" >> "\$STATUS_FILE"
+            sleep 60
+          done
+          
+          echo ""
+          echo "✅ 20-minute runtime completed at \$(date)"
+          echo "End time: \$(date)" >> "\$STATUS_FILE"
+          
+          EOF
+
+      - name: Upload Final Status
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: login-screen-test-summary
+          name: rustdesk-final-status
           path: |
-            ${{ env.SCREENSHOT_DIR }}/test_info.txt
-          retention-days: 7
+            ${{ env.SCREENSHOT_DIR }}/rustdesk_status.txt
+            ${{ env.SCREENSHOT_DIR }}
+          retention-days: 1
 
-      - name: Final Report
+      - name: Final Cleanup as Hamiya
+        if: always()
         run: |
-          echo "=== Login Screen Capture Test Complete ==="
-          echo ""
-          echo "📊 Summary:"
-          echo "  ✅ macOS Version: $(sw_vers -productVersion)"
-          echo "  ✅ User 'Hamiya' created with password 'Hamza@157'"
-          echo "  ✅ User added to admin group"
-          SCREENSHOT_COUNT=$(find "$SCREENSHOT_DIR" -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
-          echo "  ✅ $SCREENSHOT_COUNT screenshots attempted"
-          echo ""
-          echo "🔄 Methods Tested:"
-          echo "  1. sudo login Hamiya"
-          echo "  2. CGSession -switchToUser Hamiya"
-          echo "  3. Direct login screen interaction"
-          echo ""
-          echo "🎯 Actions Performed:"
-          echo "  • Clicked at (17, 19) on login screen"
-          echo "  • Clicked at other test coordinates"
-          echo "  • Attempted multiple screenshot captures"
-          echo ""
-          echo "⚠️ Important Note:"
-          echo "Login screen capture in CI environments is challenging due to:"
-          echo "  • macOS security restrictions (TCC)"
-          echo "  • Screen Recording permissions"
-          echo "  • Headless environment limitations"
-          echo "  • Secure input context of login screen"
-          echo ""
-          echo "Some screenshots may be black or fail due to these restrictions."
-          echo ""
-          echo "📁 Artifacts uploaded for review."
-          echo "✅ Test completed!"
+          echo "=== Final Cleanup ==="
+          
+          # Final screenshot as Hamiya
+          sudo -u Hamiya /bin/bash << 'EOF'
+          
+          export HOME=/Users/Hamiya
+          cd \$HOME
+          
+          final_file="\$SCREENSHOT_DIR/final_complete_\$(date +%H%M%S).png"
+          screencapture -x "\$final_file" 2>/dev/null && echo "✅ Final screenshot taken" || echo "⚠️ Could not take final screenshot"
+          
+          # Stop RustDesk
+          pkill -u Hamiya -f "RustDesk" 2>/dev/null || true
+          
+          EOF
+          
+          echo "✅ Cleanup complete"
+          echo "Total workflow time: ~25 minutes"
+          echo "Total screenshots captured: \$(find "$SCREENSHOT_DIR" -name "*.png" 2>/dev/null | wc -l)"
