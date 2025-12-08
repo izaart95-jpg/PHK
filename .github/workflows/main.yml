@@ -1,193 +1,89 @@
-name: SSHX Remote Access with Sunshine
+name: SSHX Session
 
 on:
   workflow_dispatch:
 
-env:
-  SSHX_SESSION_FILE: /tmp/sshx_session.log
-  SSHX_PID: 0
-
 jobs:
-  setup-sshx:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours total
+  sshx-session:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    
+    env:
+      SSHX_SESSION_FILE: /tmp/sshx_output.txt
 
     steps:
-      - name: Install dependencies
-        run: |
-          echo "=== Installing basic dependencies ==="
-          sudo apt-get update
-          sudo apt-get install -y curl wget xterm screen tmux
-          echo "✅ Dependencies installed"
-
       - name: Install sshx and show URL
         run: |
           echo "=== Installing sshx ==="
           curl -sSf https://sshx.io/get | sh
           
-          # Verify installation
-          which sshx
-          sshx --version || true
-          
           echo ""
           echo "=== Starting sshx session ==="
           
-          # Clear any previous log file
-          > "$SSHX_SESSION_FILE"
-          
-          # Run sshx in screen/tmux to keep it running with pseudo-TTY
-          # Use a wrapper script to capture output better
-          cat > /tmp/run_sshx.sh << 'EOF'
-#!/bin/bash
-# Run sshx and capture all output
-exec sshx 2>&1
-EOF
-          chmod +x /tmp/run_sshx.sh
-          
-          # Run in background with proper output redirection
-          /tmp/run_sshx.sh >> "$SSHX_SESSION_FILE" 2>&1 &
+          # Run sshx and capture output to file
+          sshx 2>&1 | tee "$SSHX_SESSION_FILE" &
           SSHX_PID=$!
-          echo "SSHX_PID=$SSHX_PID" >> $GITHUB_ENV
           
-          # Wait longer for sshx to initialize
-          echo "Waiting for sshx to initialize..."
-          for i in {1..20}; do
-            if ps -p $SSHX_PID > /dev/null 2>&1; then
-              echo "sshx process alive (attempt $i)"
-              
-              # Check for URL in logs
-              if grep -q -E "(sshx://|https?://[^ ]*sshx)" "$SSHX_SESSION_FILE"; then
-                echo "Found URL in logs!"
-                break
-              fi
-            else
-              echo "sshx process died, restarting..."
-              /tmp/run_sshx.sh >> "$SSHX_SESSION_FILE" 2>&1 &
-              SSHX_PID=$!
-              echo "SSHX_PID=$SSHX_PID" >> $GITHUB_ENV
-            fi
-            sleep 3
-          done
+          # Wait for sshx to start
+          sleep 10
           
           # Check if sshx is running
           if ps -p $SSHX_PID > /dev/null 2>&1; then
             echo "✅ sshx running with PID: $SSHX_PID"
           else
-            echo "❌ sshx failed to start"
+            echo "⚠️ sshx may have exited"
           fi
           
-          # Extract and show the sshx URL with multiple patterns
+          # Extract and show the sshx URL
           echo ""
           echo "=== SSHX Connection URL ==="
           if [ -f "$SSHX_SESSION_FILE" ]; then
-            # Display recent logs
-            echo "=== Last 30 lines of sshx output ==="
-            tail -30 "$SSHX_SESSION_FILE"
-            echo ""
-            
-            # Try multiple patterns to find the URL
-            echo "=== Searching for URLs ==="
-            
-            # Pattern 1: sshx:// URLs
-            SSHX_URL1=$(grep -o "sshx://[^ ]*" "$SSHX_SESSION_FILE" | head -1)
-            
-            # Pattern 2: https://sshx.io URLs
-            SSHX_URL2=$(grep -o "https://sshx\.io/[^ ]*" "$SSHX_SESSION_FILE" | head -1)
-            
-            # Pattern 3: Any URL containing sshx
-            SSHX_URL3=$(grep -o "https://[^ ]*sshx[^ ]*" "$SSHX_SESSION_FILE" | head -1)
-            
-            # Pattern 4: Look for connection strings
-            SSHX_URL4=$(grep -E "Connect via:|Connect at:|URL:|http" "$SSHX_SESSION_FILE" | grep -o "https://[^ ]*" | head -1)
-            
-            # Combine results - use first non-empty
-            SSHX_URL=""
-            for url in "$SSHX_URL1" "$SSHX_URL2" "$SSHX_URL3" "$SSHX_URL4"; do
-              if [ ! -z "$url" ] && [ -z "$SSHX_URL" ]; then
-                SSHX_URL="$url"
-              fi
-            done
-            
-            if [ ! -z "$SSHX_URL" ]; then
+            # Look for the sshx.io URL in the output
+            SSHX_URL=$(grep -o "https://sshx.io/[a-zA-Z0-9_-]\+" "$SSHX_SESSION_FILE" | head -1 || true)
+            if [ -n "$SSHX_URL" ]; then
               echo "🔗 Connect via: $SSHX_URL"
               echo "SSHX_URL=$SSHX_URL" >> $GITHUB_ENV
-              
-              # Also try to decode/clean the URL
-              CLEAN_URL=$(echo "$SSHX_URL" | sed 's/[[:space:]]*$//' | sed 's/^[[:space:]]*//')
-              echo "📋 Clean URL: $CLEAN_URL"
-              
-              # Create a clickable link in GitHub Actions
-              echo "::notice::SSHX Connection URL: $CLEAN_URL"
-              
-              # Save to file for download
-              echo "$CLEAN_URL" > sshx_connection_url.txt
             else
               echo "⚠️ Could not extract SSHX URL from logs"
-              echo "Trying to find any web URLs..."
-              grep -E "(https?://|ssh://|wss://)" "$SSHX_SESSION_FILE" || echo "No web URLs found"
+              echo "Trying alternative patterns..."
+              
+              # Try different URL patterns
+              SSHX_URL=$(grep -o "sshx://[a-zA-Z0-9._-]\+" "$SSHX_SESSION_FILE" | head -1 || true)
+              if [ -n "$SSHX_URL" ]; then
+                echo "🔗 Connect via: $SSHX_URL"
+                echo "SSHX_URL=$SSHX_URL" >> $GITHUB_ENV
+              else
+                SSHX_URL=$(grep -o "sshx.io/[a-zA-Z0-9_-]\+" "$SSHX_SESSION_FILE" | head -1 || true)
+                if [ -n "$SSHX_URL" ]; then
+                  echo "🔗 Connect via: https://$SSHX_URL"
+                  echo "SSHX_URL=https://$SSHX_URL" >> $GITHUB_ENV
+                else
+                  echo "⚠️ Still no URL found"
+                  echo "=== Full sshx output ==="
+                  cat "$SSHX_SESSION_FILE" || true
+                fi
+              fi
             fi
           fi
           
-          # If still no URL, check if we can get it from process
-          if [ -z "$SSHX_URL" ] && ps -p $SSHX_PID > /dev/null 2>&1; then
-            echo "=== Checking process info ==="
-            # Check what sshx is listening on
-            sudo netstat -tlnp 2>/dev/null | grep "$SSHX_PID" || true
-            sudo ss -tlnp 2>/dev/null | grep "$SSHX_PID" || true
-          fi
-
-      - name: Upload SSHX URL
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sshx-connection-info
-          path: |
-            sshx_connection_url.txt
-            ${{ env.SSHX_SESSION_FILE }}
-          retention-days: 7
-
-      # ... rest of your existing steps remain the same ...
-
-      - name: Keep SSHX alive for 6 hours
+      - name: Keep session alive
         run: |
-          echo "=== SSHX Remote Access Active ==="
-          echo ""
-          echo "Start time: $(date)"
-          echo "Will keep alive until: $(date -d '+6 hours')"
-          echo ""
+          echo "=== Keeping sshx session active ==="
+          echo "Session will stay active for 10 minutes..."
           
-          # Display SSHX connection info
-          if [ -f "$SSHX_SESSION_FILE" ]; then
-            echo "=== SSHX Session Information ==="
-            # Updated URL extraction
-            SSHX_URL=$(grep -E -o "(sshx://[^ ]*|https://sshx\.io/[^ ]*|https://[^ ]*sshx[^ ]*)" "$SSHX_SESSION_FILE" | head -1)
-            if [ ! -z "$SSHX_URL" ]; then
-              echo "🔗 SSHX Connection URL: $SSHX_URL"
-              echo "::notice::SSHX Connection URL: $SSHX_URL"
-            else
-              echo "⚠️ SSHX URL not found in logs"
-              echo "Displaying recent activity:"
-              tail -5 "$SSHX_SESSION_FILE" || true
+          # Check if sshx is still running
+          if [ -f "$SSHX_SESSION_FILE" ] && [ -n "$SSHX_PID" ] && ps -p $SSHX_PID > /dev/null 2>&1; then
+            echo "✅ sshx still running (PID: $SSHX_PID)"
+            if [ -n "$SSHX_URL" ]; then
+              echo "🔗 Connection URL: $SSHX_URL"
             fi
-            echo ""
+          else
+            echo "⚠️ sshx not running, starting new session..."
+            sshx 2>&1 | tee "$SSHX_SESSION_FILE" &
+            sleep 5
           fi
           
-          # Rest of your existing keep-alive logic...
-
-      - name: Cleanup
-        if: always()
-        run: |
-          echo "=== Cleaning up ==="
-          
-          # Save final logs
-          echo "=== Final SSHX Logs ==="
-          tail -50 "$SSHX_SESSION_FILE" 2>/dev/null || true
-          
-          # Kill sshx process
-          if [ ! -z "$SSHX_PID" ] && ps -p $SSHX_PID > /dev/null 2>&1; then
-            echo "Stopping sshx (PID: $SSHX_PID)..."
-            kill $SSHX_PID 2>/dev/null || true
-            sleep 2
-          fi
-          
-          # Rest of cleanup...
+          # Keep workflow running
+          echo "Waiting 600 seconds..."
+          sleep 600
+          echo "Session complete"
