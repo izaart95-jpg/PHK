@@ -59,38 +59,8 @@ jobs:
             fi
           fi
 
-      - name: Install Ubuntu Desktop and VNC
-        run: |
-          echo "=== Installing Ubuntu Desktop and VNC ==="
-          
-          # Install required packages
-          sudo apt-get update
-          sudo apt-get install -y \
-            ubuntu-desktop \
-            tigervnc-standalone-server \
-            dbus-x11 \
-           
-            
-          echo "✅ Ubuntu Desktop and VNC installed"
-
-      - name: Install Tailscale
-        run: |
-          echo "=== Installing Tailscale ==="
-          
-          # Install Tailscale
-          curl -fsSL https://tailscale.com/install.sh | sh
-          
-          # Start Tailscale with auth key
-          sudo tailscale up --auth-key "tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf" --hostname "github-runner-$(date +%s)" &
-          
-          echo "✅ Tailscale installed and connecting in background"
-          
-          # Wait a bit for connection
-          sleep 15
-          
-          # Show Tailscale status
-          echo "=== Tailscale Status ==="
-          sudo tailscale status || true
+     
+        
 
  
 
@@ -114,12 +84,7 @@ jobs:
             echo ""
           fi
           
-          # Display Tailscale IP if connected
-          echo "=== Tailscale Status ==="
-          sudo tailscale ip 2>/dev/null | head -1 | while read ip; do
-            echo "🌐 Tailscale IP: $ip"
-          done || echo "Tailscale IP not available"
-          echo ""
+         
           
           # Keep alive for 6 hours (360 minutes)
           TOTAL_MINUTES=360
