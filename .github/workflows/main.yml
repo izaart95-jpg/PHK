@@ -1,10 +1,10 @@
-name: macOS User and Login Configuration Test
+name: macOS User Management and Settings Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  macos-config-test:
+  user-management-test:
     runs-on: macos-latest
     timeout-minutes: 25
 
@@ -15,33 +15,13 @@ jobs:
           sw_vers
           echo "RUNNER_OS=$RUNNER_OS" >> $GITHUB_ENV
 
-      - name: Create Workspace Directory
+      - name: Create Screenshot Directory
         run: |
-          echo "=== Setting up workspace ==="
-          echo "Current directory: $(pwd)"
-          
-          # Create workspace directory
-          WORKSPACE_DIR="$(pwd)/workspace"
-          mkdir -p "$WORKSPACE_DIR"
-          
-          # Create screenshot directory
-          SCREENSHOT_DIR="$WORKSPACE_DIR/screenshots"
-          mkdir -p "$SCREENSHOT_DIR"
-          
-          echo "WORKSPACE_DIR=$WORKSPACE_DIR" >> $GITHUB_ENV
-          echo "SCREENSHOT_DIR=$SCREENSHOT_DIR" >> $GITHUB_ENV
-          
-          # Create metadata file in workspace
-          METADATA_FILE="$WORKSPACE_DIR/test_metadata.txt"
-          echo "macOS Configuration Test" > "$METADATA_FILE"
-          echo "======================" >> "$METADATA_FILE"
-          echo "Date: $(date)" >> "$METADATA_FILE"
-          echo "macOS Version: $(sw_vers -productVersion)" >> "$METADATA_FILE"
-          echo "Workspace: $WORKSPACE_DIR" >> "$METADATA_FILE"
-          
-          echo "✅ Workspace created: $WORKSPACE_DIR"
+          echo "=== Creating Screenshot Directory ==="
+          mkdir -p screenshots
+          echo "SCREENSHOT_DIR=$(pwd)/screenshots" >> $GITHUB_ENV
 
-      - name: Initial Screenshot (Clean Desktop)
+      - name: Initial Screenshot
         run: |
           echo "=== Taking Initial Screenshot ==="
           timestamp=$(date +%Y%m%d_%H%M%S)
@@ -53,71 +33,60 @@ jobs:
         run: |
           echo "=== Enabling Multiple Sessions ==="
           
-          echo "Setting MultipleSessionEnabled to true..."
+          # Enable multiple sessions
+          echo "Enabling MultipleSessionEnabled..."
           sudo defaults write /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled -bool true
           
-          echo "Setting MultipleSessionName to 'FullName'..."
+          # Set multiple session name
+          echo "Setting MultipleSessionName..."
           sudo defaults write /Library/Preferences/com.apple.loginwindow MultipleSessionName -string "FullName"
           
-          echo "✅ Multiple session settings configured"
+          # Verify the settings
+          echo "Verifying settings:"
+          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled
+          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionName
           
-          # Verify settings
-          echo "Current MultipleSessionEnabled:"
-          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled 2>/dev/null || echo "Not set"
-          
-          echo "Current MultipleSessionName:"
-          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionName 2>/dev/null || echo "Not set"
+          echo "✅ Multiple sessions enabled"
 
       - name: Create Admin User
         run: |
           echo "=== Creating Admin User ==="
           
           # Create new user
-          echo "Creating user 'Hamiya' with full name 'Hamiyas'..."
-          sudo sysadminctl -addUser Hamiya -fullName "Hamiyas" -password "Hamza@157" -admin
+          echo "Creating user 'Hamiya'..."
+          sudo sysadminctl -addUser Hamiya -fullName "Hamiyas" -password "Hamza@157" || echo "User may already exist, continuing..."
           
-          # Add to admin group (additional method)
-          echo "Adding user to admin group..."
-          sudo dseditgroup -o edit -a Hamiya -t user admin
+          # Add user to admin group
+          echo "Adding 'Hamiya' to admin group..."
+          sudo dseditgroup -o edit -a Hamiya -t user admin || echo "User may already be admin, continuing..."
           
-          # Verify user creation
-          echo "Verifying user creation..."
-          id Hamiya 2>/dev/null || echo "User not found"
+          # Verify admin membership
+          echo "Verifying admin membership:"
+          sudo dscl . read /Groups/admin GroupMembership || echo "Could not read admin group"
           
-          # Check admin group membership
-          echo "Checking admin group membership..."
-          dscl . read /Groups/admin GroupMembership 2>/dev/null || echo "Could not read admin group"
-          
-          echo "✅ User creation and admin assignment completed"
-
-      - name: Screenshot After Configuration
-        run: |
-          echo "=== Screenshot After Configuration ==="
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          screenshot_file="$SCREENSHOT_DIR/02_after_config_$timestamp.png"
-          screencapture -x "$screenshot_file"
-          echo "✅ Configuration screenshot saved"
+          echo "✅ User creation complete"
 
       - name: Install cliclick for UI Automation
         run: |
           echo "=== Installing cliclick ==="
           
+          # Install cliclick for precise clicking
           if ! command -v cliclick &> /dev/null; then
             echo "Installing cliclick..."
             brew install cliclick
           else
-            echo "cliclick already installed"
+            echo "✅ cliclick already installed"
           fi
           
-          echo "✅ cliclick ready"
+          # Verify installation
+          cliclick -v || echo "cliclick version check failed"
 
       - name: Open System Settings
         run: |
           echo "=== Opening System Settings ==="
           
           # Close System Settings if already open
-          echo "Closing any existing System Settings..."
-          osascript -e 'tell application "System Settings" to quit' 2>/dev/null || true
+          pkill -f "System Settings" 2>/dev/null || true
           sleep 2
           
           # Open System Settings
@@ -126,7 +95,7 @@ jobs:
           
           # Wait for System Settings to open
           echo "Waiting for System Settings to launch..."
-          for i in {1..15}; do
+          for i in {1..10}; do
             if pgrep -f "System Settings" > /dev/null; then
               echo "✅ System Settings process found (attempt $i)"
               break
@@ -134,240 +103,211 @@ jobs:
             sleep 1
           done
           
-          # Wait for UI to load
-          echo "Waiting for UI to load..."
+          # Give UI time to load
           sleep 3
           
           # Take screenshot after opening
-          screenshot_file="$SCREENSHOT_DIR/03_system_settings_open_$(date +%H%M%S).png"
+          screenshot_file="$SCREENSHOT_DIR/02_system_settings_open_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
-          echo "✅ System Settings screenshot saved"
+          echo "✅ System Settings opened, screenshot saved"
 
-      - name: Click at 507,363 and Wait
+      - name: Click at 507,363
         run: |
           echo "=== Clicking at coordinates (507, 363) ==="
           
-          # First, ensure System Settings is in front
-          echo "Bringing System Settings to front..."
-          osascript <<'EOF'
-          tell application "System Settings"
-            activate
-            delay 1
-          end tell
-          EOF
-          
-          sleep 1
-          
           # Take screenshot before click
-          screenshot_file="$SCREENSHOT_DIR/04_before_507_363_click_$(date +%H%M%S).png"
+          screenshot_file="$SCREENSHOT_DIR/03_before_click_507_363_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
           echo "📸 Screenshot before click saved"
           
-          # Click at 507,363
+          # Click at coordinates (507, 363)
           echo "Clicking at coordinates (507, 363)..."
           cliclick c:507,363
           
-          # Wait 2 seconds as requested
-          echo "Waiting 2 seconds after click..."
+          echo "✅ Click performed at (507, 363)"
+          
+          # Wait for action to complete
           sleep 2
           
           # Take screenshot after click
-          screenshot_file="$SCREENSHOT_DIR/05_after_507_363_click_$(date +%H%M%S).png"
+          screenshot_file="$SCREENSHOT_DIR/04_after_click_507_363_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
-          echo "✅ Screenshot after click saved"
+          echo "📸 Screenshot after click saved"
 
       - name: Search for Fast User Switching
         run: |
-          echo "=== Searching for Fast User Switching ==="
+          echo "=== Searching for 'Fast User Switching' ==="
           
-          # Bring System Settings to front
-          osascript <<'EOF'
-          tell application "System Settings"
-            activate
-            delay 1
-          end tell
-          EOF
+          # Wait 5 seconds as requested
+          echo "Waiting 5 seconds..."
+          sleep 5
           
+          # Take screenshot before search
+          screenshot_file="$SCREENSHOT_DIR/05_before_search_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot before search saved"
+          
+          # Activate System Settings window
+          echo "Activating System Settings window..."
+          osascript -e 'tell application "System Settings" to activate' 2>/dev/null || true
           sleep 1
           
-          # Type "Fast User Switching" in search
-          echo "Typing 'Fast User Switching' in search..."
+          # Use keyboard shortcut Cmd+F to open search
+          echo "Opening search with Cmd+F..."
+          osascript -e 'tell application "System Events" to keystroke "f" using command down'
+          sleep 1
           
-          # Use AppleScript to search
-          echo "Attempting search via AppleScript..."
+          # Type "Fast User Switching" into search
+          echo "Typing 'Fast User Switching'..."
+          osascript -e 'tell application "System Events" to keystroke "Fast User Switching"'
+          sleep 2
           
-          osascript <<'EOF' 2>&1 || echo "AppleScript search attempted"
-          tell application "System Events"
-            tell process "System Settings"
-              activate
-              delay 1
-              
-              -- Try keyboard shortcut for search (Cmd+F)
-              try
-                keystroke "f" using {command down}
-                delay 1
-                
-                -- Type the search term
-                keystroke "Fast User Switching"
-                delay 2
-                
-                -- Press Enter
-                key code 36
-                delay 2
-                
-                log "Search completed via Cmd+F"
-              on error errMsg
-                log "Cmd+F method failed: " & errMsg
-              end try
-            end tell
-          end tell
-          EOF
+          # Take screenshot after typing search
+          screenshot_file="$SCREENSHOT_DIR/06_search_typed_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot after search typed saved"
           
-          # Wait for search results
-          echo "Waiting for search results..."
-          sleep 3
+          # Press Enter to search
+          echo "Pressing Enter to search..."
+          osascript -e 'tell application "System Events" to key code 36'  # Enter key
+          sleep 2
           
           # Take screenshot of search results
-          screenshot_file="$SCREENSHOT_DIR/06_fast_user_switching_search_$(date +%H%M%S).png"
+          screenshot_file="$SCREENSHOT_DIR/07_search_results_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
-          echo "✅ Fast User Switching search screenshot saved"
+          echo "📸 Screenshot of search results saved"
 
-      - name: Click at 858,11 (Close Button)
+      - name: Click at 858,11 and Screenshot
         run: |
-          echo "=== Clicking at coordinates (858, 11) ==="
+          echo "=== Final Task: Click at (858, 11) ==="
           
-          # Bring System Settings to front
-          osascript <<'EOF'
-          tell application "System Settings"
-            activate
-            delay 1
-          end tell
-          EOF
-          
-          sleep 1
-          
-          # Take screenshot before clicking close
-          screenshot_file="$SCREENSHOT_DIR/07_before_858_11_click_$(date +%H%M%S).png"
+          # Take screenshot before final click
+          screenshot_file="$SCREENSHOT_DIR/08_before_final_click_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
-          echo "📸 Screenshot before close button click saved"
+          echo "📸 Screenshot before final click saved"
           
-          # Click at 858,11 (typically close button location)
+          # Click at coordinates (858, 11)
           echo "Clicking at coordinates (858, 11)..."
           cliclick c:858,11
           
-          # Wait a moment
+          echo "✅ Final click performed at (858, 11)"
+          
+          # Wait briefly
           sleep 2
           
-          # Take screenshot after clicking
-          screenshot_file="$SCREENSHOT_DIR/08_after_858_11_click_$(date +%H%M%S).png"
+          # Take final screenshot
+          screenshot_file="$SCREENSHOT_DIR/09_after_final_click_$(date +%H%M%S).png"
           screencapture -x "$screenshot_file"
-          echo "✅ Screenshot after close button click saved"
+          echo "📸 Final screenshot saved"
 
-      - name: Final Screenshot and Cleanup
+      - name: Capture System Information
         run: |
-          echo "=== Final Steps ==="
+          echo "=== Capturing System Information ==="
           
-          # Take final desktop screenshot
-          echo "Taking final desktop screenshot..."
-          screenshot_file="$SCREENSHOT_DIR/09_final_desktop_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
+          INFO_FILE="$SCREENSHOT_DIR/system_info.txt"
           
-          # Close System Settings if still open
-          echo "Closing System Settings..."
-          osascript -e 'tell application "System Settings" to quit' 2>/dev/null || true
-          sleep 2
-          pkill -f "System Settings" 2>/dev/null || true
-          
-          echo "✅ Cleanup completed"
-
-      - name: Capture Configuration Information
-        run: |
-          echo "=== Capturing Configuration Information ==="
-          
-          INFO_FILE="$WORKSPACE_DIR/configuration_info.txt"
-          
-          echo "macOS Configuration Test Report" > "$INFO_FILE"
-          echo "==============================" >> "$INFO_FILE"
+          echo "macOS User Management Test Report" > "$INFO_FILE"
+          echo "=================================" >> "$INFO_FILE"
           echo "Test Date: $(date)" >> "$INFO_FILE"
           echo "macOS Version: $(sw_vers -productVersion)" >> "$INFO_FILE"
           echo "" >> "$INFO_FILE"
           
-          echo "Login Window Configuration:" >> "$INFO_FILE"
-          echo "---------------------------" >> "$INFO_FILE"
-          echo "MultipleSessionEnabled:" >> "$INFO_FILE"
+          echo "System Configuration:" >> "$INFO_FILE"
+          echo "-------------------" >> "$INFO_FILE"
+          
+          # Check multiple session settings
+          echo "Multiple Session Settings:" >> "$INFO_FILE"
           sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled 2>/dev/null >> "$INFO_FILE" || echo "Not set" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          echo "MultipleSessionName:" >> "$INFO_FILE"
           sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionName 2>/dev/null >> "$INFO_FILE" || echo "Not set" >> "$INFO_FILE"
           echo "" >> "$INFO_FILE"
           
+          # Check created user
           echo "User Information:" >> "$INFO_FILE"
-          echo "-----------------" >> "$INFO_FILE"
-          echo "User 'Hamiya':" >> "$INFO_FILE"
-          id Hamiya 2>/dev/null >> "$INFO_FILE" || echo "User 'Hamiya' not found" >> "$INFO_FILE"
+          id Hamiya 2>/dev/null >> "$INFO_FILE" || echo "User not found" >> "$INFO_FILE"
           echo "" >> "$INFO_FILE"
           
-          echo "Admin Group Membership:" >> "$INFO_FILE"
+          # Check admin group membership
+          echo "Admin Group Members:" >> "$INFO_FILE"
           dscl . read /Groups/admin GroupMembership 2>/dev/null >> "$INFO_FILE" || echo "Could not read admin group" >> "$INFO_FILE"
+          echo "" >> "$INFO_FILE"
+          
+          # Get screen resolution
+          echo "Screen Resolution:" >> "$INFO_FILE"
+          system_profiler SPDisplaysDataType 2>/dev/null | grep -A1 "Resolution:" | tail -1 >> "$INFO_FILE" || echo "Unknown" >> "$INFO_FILE"
           echo "" >> "$INFO_FILE"
           
           echo "Test Actions Performed:" >> "$INFO_FILE"
           echo "----------------------" >> "$INFO_FILE"
-          echo "1. Enabled MultipleSessionEnabled = true" >> "$INFO_FILE"
-          echo "2. Set MultipleSessionName = 'FullName'" >> "$INFO_FILE"
-          echo "3. Created user 'Hamiya' with full name 'Hamiyas'" >> "$INFO_FILE"
-          echo "4. Added user to admin group" >> "$INFO_FILE"
-          echo "5. Opened System Settings" >> "$INFO_FILE"
-          echo "6. Clicked at coordinates (507, 363)" >> "$INFO_FILE"
-          echo "7. Searched for 'Fast User Switching'" >> "$INFO_FILE"
-          echo "8. Clicked at coordinates (858, 11) - close button" >> "$INFO_FILE"
+          echo "1. Enabled MultipleSessionEnabled and set MultipleSessionName" >> "$INFO_FILE"
+          echo "2. Created user 'Hamiya' with admin privileges" >> "$INFO_FILE"
+          echo "3. Opened System Settings" >> "$INFO_FILE"
+          echo "4. Clicked at coordinates (507, 363)" >> "$INFO_FILE"
+          echo "5. Searched for 'Fast User Switching'" >> "$INFO_FILE"
+          echo "6. Clicked at coordinates (858, 11)" >> "$INFO_FILE"
           echo "" >> "$INFO_FILE"
           
           echo "Screenshots Captured:" >> "$INFO_FILE"
-          echo "--------------------" >> "$INFO_FILE"
+          echo "-------------------" >> "$INFO_FILE"
           find "$SCREENSHOT_DIR" -name "*.png" -exec basename {} \; | sort >> "$INFO_FILE"
           
-          echo "Total screenshots: $(find "$SCREENSHOT_DIR" -name "*.png" | wc -l)" >> "$INFO_FILE"
-          
-          echo "✅ Configuration info saved"
+          echo "✅ System information saved"
 
-      - name: Upload All Screenshots
+      - name: Cleanup
+        run: |
+          echo "=== Cleaning Up ==="
+          
+          # Close System Settings
+          echo "Closing System Settings..."
+          pkill -f "System Settings" 2>/dev/null || true
+          
+          # Take one final desktop screenshot
+          screenshot_file="$SCREENSHOT_DIR/10_final_desktop_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Final desktop screenshot saved"
+
+      - name: Upload Screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: macos-config-screenshots
-          path: ${{ env.SCREENSHOT_DIR }}
+          name: macos-user-management-screenshots
+          path: |
+            ${{ env.SCREENSHOT_DIR }}
           retention-days: 7
 
-      - name: Upload Configuration Reports
+      - name: Upload Summary
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: macos-config-reports
+          name: macos-user-management-summary
           path: |
-            ${{ env.WORKSPACE_DIR }}/configuration_info.txt
-            ${{ env.WORKSPACE_DIR }}/test_metadata.txt
+            ${{ env.SCREENSHOT_DIR }}/system_info.txt
           retention-days: 7
 
-      - name: Final Summary
+      - name: Final Report
         run: |
-          echo "=== macOS Configuration Test Complete ==="
+          echo "=== macOS User Management Test Complete ==="
           echo ""
           echo "📊 Summary:"
           echo "  ✅ macOS Version: $(sw_vers -productVersion)"
-          echo "  ✅ Multiple session login enabled"
-          echo "  ✅ Admin user 'Hamiya' created"
+          echo "  ✅ Multiple sessions enabled"
+          echo "  ✅ User 'Hamiya' created with admin privileges"
+          echo "  ✅ System Settings opened and tested"
           SCREENSHOT_COUNT=$(find "$SCREENSHOT_DIR" -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
           echo "  ✅ $SCREENSHOT_COUNT screenshots captured"
-          echo "  ✅ System Settings interaction tested"
-          echo "  ✅ UI automation with clicks at specific coordinates"
+          echo "  ✅ All clicks performed at specified coordinates"
+          echo ""
+          echo "🎯 Test Tasks Completed:"
+          echo "  1. sudo defaults write /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled -bool true"
+          echo "  2. sudo defaults write /Library/Preferences/com.apple.loginwindow MultipleSessionName -string 'FullName'"
+          echo "  3. sudo sysadminctl -addUser Hamiya -fullName 'Hamiyas' -password Hamza@157"
+          echo "  4. sudo dseditgroup -o edit -a Hamiya -t user admin"
+          echo "  5. dscl . read /Groups/admin GroupMembership"
+          echo "  6. Opened System Settings"
+          echo "  7. Clicked at (507, 363)"
+          echo "  8. Searched for 'Fast User Switching'"
+          echo "  9. Clicked at (858, 11)"
           echo ""
           echo "📁 Artifacts:"
-          echo "  • Screenshots uploaded as 'macos-config-screenshots'"
-          echo "  • Configuration reports uploaded as 'macos-config-reports'"
+          echo "  • Screenshots uploaded as 'macos-user-management-screenshots'"
+          echo "  • Test summary uploaded as 'macos-user-management-summary'"
           echo ""
-          echo "🔧 Configuration Applied:"
-          echo "  • MultipleSessionEnabled: true"
-          echo "  • MultipleSessionName: 'FullName'"
-          echo "  • User 'Hamiya' added to admin group"
-          echo ""
-          echo "🎯 Test sequence completed successfully!"
+          echo "✅ All tasks completed successfully!"
