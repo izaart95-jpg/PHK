@@ -1,56 +1,197 @@
-name: Run sshx.io
+name: SSHX Remote Access with Sunshine
 
 on:
   workflow_dispatch:
 
+env:
+  SSHX_SESSION_FILE: /tmp/sshx_session.log
+  SSHX_PID: 0
+
 jobs:
-  run-sshx:
-    runs-on: macos-latest
-    timeout-minutes: 15
+  setup-sshx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours total
 
     steps:
-      - name: Install and run sshx
+      - name: Install dependencies
         run: |
-          echo "=== Installing and running sshx ==="
-          
-          # Install sshx
+          echo "=== Installing basic dependencies ==="
+          sudo apt-get update
+          sudo apt-get install -y curl wget
+          echo "✅ Dependencies installed"
+
+      - name: Install sshx and show URL
+        run: |
+          echo "=== Installing sshx ==="
           curl -sSf https://sshx.io/get | sh
           
-          # Wait a moment for installation to complete
-          sleep 2
-          
-          # Now run sshx to get the URL
+          echo ""
           echo "=== Starting sshx session ==="
           
-          # Run sshx in background and capture output
-          # The -t flag creates a persistent tunnel
-          sshx -t &
+          # Run sshx and capture output to file
+          sshx 2>&1 | tee "$SSHX_SESSION_FILE" &
           SSHX_PID=$!
+          echo "SSHX_PID=$SSHX_PID" >> $GITHUB_ENV
           
-          # Give sshx time to start and generate URL
-          sleep 5
+          # Wait for sshx to start
+          sleep 10
           
-          # Try to get URL (sshx might print it to stderr or stdout)
-          echo "=== Attempting to get sshx URL ==="
-          
-          # Check if sshx process is running
-          if ps -p $SSHX_PID > /dev/null; then
-            echo "✅ sshx is running with PID: $SSHX_PID"
-            
-            # sshx usually prints URL to stderr when run with -t
-            # We'll try to capture recent logs
-            echo "Checking for sshx URL in logs..."
-            
-            # Run sshx in a way that might show the URL
-            timeout 3 sshx -t 2>&1 | grep -i "sshx://" || echo "URL not found in output"
-            
+          # Check if sshx is running
+          if ps -p $SSHX_PID > /dev/null 2>&1; then
+            echo "✅ sshx running with PID: $SSHX_PID"
           else
-            echo "❌ sshx failed to start"
+            echo "⚠️ sshx may have exited"
           fi
           
-      - name: Keep session alive
+          # Extract and show the sshx URL
+          echo ""
+          echo "=== SSHX Connection URL ==="
+          if [ -f "$SSHX_SESSION_FILE" ]; then
+            # Look for the sshx.io URL in the output
+            SSHX_URL=$(grep -o "https://sshx.io/[a-zA-Z0-9-]\+" "$SSHX_SESSION_FILE" | head -1 || true)
+            if [ ! -z "$SSHX_URL" ]; then
+              echo "🔗 Connect via: $SSHX_URL"
+              echo "SSHX_URL=$SSHX_URL" >> $GITHUB_ENV
+            else
+              echo "⚠️ Could not extract SSHX URL from logs"
+              echo "=== Last 10 lines of sshx output ==="
+              tail -10 "$SSHX_SESSION_FILE" || true
+            fi
+          fi
+
+      - name: Install Ubuntu Desktop and VNC
         run: |
-          echo "=== Keeping sshx session alive for 10 minutes ==="
-          # Keep the workflow running so sshx stays active
-          sleep 600
-          echo "10 minutes have passed"
+          echo "=== Installing Ubuntu Desktop and VNC ==="
+          
+          # Install required packages
+          sudo apt-get update
+          sudo apt-get install -y \
+            ubuntu-desktop \
+            tigervnc-standalone-server \
+            dbus-x11 \
+           
+            
+          echo "✅ Ubuntu Desktop and VNC installed"
+
+      - name: Install Tailscale
+        run: |
+          echo "=== Installing Tailscale ==="
+          
+          # Install Tailscale
+          curl -fsSL https://tailscale.com/install.sh | sh
+          
+          # Start Tailscale with auth key
+          sudo tailscale up --auth-key "tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf" --hostname "github-runner-$(date +%s)" &
+          
+          echo "✅ Tailscale installed and connecting in background"
+          
+          # Wait a bit for connection
+          sleep 15
+          
+          # Show Tailscale status
+          echo "=== Tailscale Status ==="
+          sudo tailscale status || true
+
+ 
+
+      - name: Keep SSHX alive for 6 hours
+        run: |
+          echo "=== SSHX Remote Access Active ==="
+          echo ""
+          echo "Start time: $(date)"
+          echo "Will keep alive until: $(date -d '+6 hours')"
+          echo ""
+          
+          # Display SSHX connection info
+          if [ -f "$SSHX_SESSION_FILE" ]; then
+            echo "=== SSHX Session Information ==="
+            SSHX_URL=$(grep -o "https://sshx.io/[a-zA-Z0-9-]\+" "$SSHX_SESSION_FILE" | head -1 || true)
+            if [ ! -z "$SSHX_URL" ]; then
+              echo "🔗 SSHX Connection URL: $SSHX_URL"
+            else
+              echo "⚠️ SSHX URL not found in logs"
+            fi
+            echo ""
+          fi
+          
+          # Display Tailscale IP if connected
+          echo "=== Tailscale Status ==="
+          sudo tailscale ip 2>/dev/null | head -1 | while read ip; do
+            echo "🌐 Tailscale IP: $ip"
+          done || echo "Tailscale IP not available"
+          echo ""
+          
+          # Keep alive for 6 hours (360 minutes)
+          TOTAL_MINUTES=360
+          for minute in $(seq 1 $TOTAL_MINUTES); do
+            echo "=== Minute $minute/$TOTAL_MINUTES ==="
+            echo "Time: $(date)"
+            echo "Elapsed: $((minute / 60))h $((minute % 60))m"
+            echo "Remaining: $(((TOTAL_MINUTES - minute) / 60))h $(((TOTAL_MINUTES - minute) % 60))m"
+            
+            # Check if sshx is running
+            if [ ! -z "$SSHX_PID" ] && ps -p $SSHX_PID > /dev/null 2>&1; then
+              echo "✅ sshx: Running (PID: $SSHX_PID)"
+            else
+              echo "❌ sshx: Not running, attempting to restart..."
+              # Kill any remaining sshx processes
+              pkill -f "sshx" 2>/dev/null || true
+              sleep 2
+              # Restart sshx
+              sshx 2>&1 | tee -a "$SSHX_SESSION_FILE" &
+              SSHX_PID=$!
+              echo "New PID: $SSHX_PID"
+              echo "SSHX_PID=$SSHX_PID" >> $GITHUB_ENV
+              sleep 10
+            fi
+            
+            # Check other services every 5 minutes
+            if [ $((minute % 5)) -eq 0 ]; then
+              echo "=== Service Status Check ==="
+              
+              # Check Tailscale
+              if sudo tailscale status 2>/dev/null | grep -q "active"; then
+                echo "✅ Tailscale: Connected"
+              else
+                echo "⚠️ Tailscale: Not connected, attempting restart..."
+                sudo tailscale up --auth-key "tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf" --reset || true
+              fi
+              
+              # Check Sunshine (if installed)
+              if systemctl is-active --quiet sunshine 2>/dev/null; then
+                echo "✅ Sunshine: Running"
+              else
+                echo "⚠️ Sunshine: Not running (or not installed)"
+              fi
+            fi
+            
+            # Wait for next minute
+            if [ $minute -lt $TOTAL_MINUTES ]; then
+              echo "⏳ Waiting 60 seconds..."
+              sleep 60
+            fi
+          done
+          
+          echo ""
+          echo "✅ 6 hours complete. Session ending."
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "=== Cleaning up ==="
+          
+          # Kill sshx process
+          if [ ! -z "$SSHX_PID" ] && ps -p $SSHX_PID > /dev/null 2>&1; then
+            echo "Stopping sshx (PID: $SSHX_PID)..."
+            kill $SSHX_PID 2>/dev/null || true
+            sleep 2
+          fi
+          
+          # Kill any other sshx processes
+          pkill -f "sshx" 2>/dev/null || true
+          
+          # Stop Tailscale
+          echo "Stopping Tailscale..."
+          sudo tailscale down 2>/dev/null || true
+          
+          echo "✅ Cleanup complete"
