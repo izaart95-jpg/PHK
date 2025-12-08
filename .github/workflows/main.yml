@@ -1,12 +1,12 @@
-name: macOS User Management and Settings Test
+name: macOS Login Screen Capture Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  user-management-test:
+  login-screen-test:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
 
     steps:
       - name: Check macOS Version
@@ -29,48 +29,39 @@ jobs:
           screencapture -x "$screenshot_file"
           echo "✅ Initial screenshot saved: $screenshot_file"
 
-      - name: Enable Multiple Sessions
+      - name: Create Admin User Hamiya
         run: |
-          echo "=== Enabling Multiple Sessions ==="
+          echo "=== Creating Admin User Hamiya ==="
           
-          # Enable multiple sessions
-          echo "Enabling MultipleSessionEnabled..."
-          sudo defaults write /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled -bool true
-          
-          # Set multiple session name
-          echo "Setting MultipleSessionName..."
-          sudo defaults write /Library/Preferences/com.apple.loginwindow MultipleSessionName -string "FullName"
-          
-          # Verify the settings
-          echo "Verifying settings:"
-          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled
-          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionName
-          
-          echo "✅ Multiple sessions enabled"
-
-      - name: Create Admin User
-        run: |
-          echo "=== Creating Admin User ==="
+          # Check if user already exists
+          if id "Hamiya" &>/dev/null; then
+            echo "⚠️ User Hamiya already exists, deleting first..."
+            sudo dscl . -delete /Users/Hamiya 2>/dev/null || true
+            sleep 1
+          fi
           
           # Create new user
           echo "Creating user 'Hamiya'..."
-          sudo sysadminctl -addUser Hamiya -fullName "Hamiyas" -password "Hamza@157" || echo "User may already exist, continuing..."
+          sudo sysadminctl -addUser Hamiya -fullName "Hamiya User" -password "Hamza@157"
           
           # Add user to admin group
           echo "Adding 'Hamiya' to admin group..."
-          sudo dseditgroup -o edit -a Hamiya -t user admin || echo "User may already be admin, continuing..."
+          sudo dseditgroup -o edit -a Hamiya -t user admin
+          
+          # Verify creation
+          echo "Verifying user creation:"
+          id Hamiya
           
           # Verify admin membership
           echo "Verifying admin membership:"
-          sudo dscl . read /Groups/admin GroupMembership || echo "Could not read admin group"
+          sudo dscl . read /Groups/admin GroupMembership | grep Hamiya || echo "Hamiya not found in admin group"
           
-          echo "✅ User creation complete"
+          echo "✅ User Hamiya created with admin privileges"
 
-      - name: Install cliclick for UI Automation
+      - name: Install cliclick
         run: |
           echo "=== Installing cliclick ==="
           
-          # Install cliclick for precise clicking
           if ! command -v cliclick &> /dev/null; then
             echo "Installing cliclick..."
             brew install cliclick
@@ -80,294 +71,236 @@ jobs:
           
           # Verify installation
           cliclick -v || echo "cliclick version check failed"
-
-      - name: Open System Settings
-        run: |
-          echo "=== Opening System Settings ==="
           
-          # Close System Settings if already open
-          pkill -f "System Settings" 2>/dev/null || true
+          # Make sure it's in PATH
+          export PATH="/opt/homebrew/bin:$PATH"
+
+      - name: Attempt Login Screen Capture Method 1
+        run: |
+          echo "=== Attempt 1: Using sudo login ==="
+          
+          # Take screenshot before login attempt
+          screenshot_file="$SCREENSHOT_DIR/02_before_login_attempt_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot before login attempt"
+          
+          # Create a script to handle the login
+          cat > switch_user.sh << 'EOF'
+          #!/bin/bash
+          
+          echo "Attempting to switch to Hamiya user..."
+          
+          # Method 1: Try sudo login
+          echo "Trying sudo login method..."
+          echo "Hamiya" | sudo login Hamiya 2>/dev/null &
+          LOGIN_PID=$!
+          
+          # Wait a bit for login screen
+          sleep 3
+          
+          # Take screenshot of login screen
+          sudo screencapture -x "$SCREENSHOT_DIR/03_login_screen_attempt_$(date +%H%M%S).png"
+          
+          # Kill the login process
+          kill $LOGIN_PID 2>/dev/null || true
+          
+          # Return to original user
           sleep 2
           
-          # Open System Settings
-          echo "Opening System Settings..."
-          open -a "System Settings"
+          echo "Login attempt completed"
+          EOF
           
-          # Wait for System Settings to open
-          echo "Waiting for System Settings to launch..."
-          for i in {1..10}; do
-            if pgrep -f "System Settings" > /dev/null; then
-              echo "✅ System Settings process found (attempt $i)"
-              break
-            fi
+          chmod +x switch_user.sh
+          
+          # Run the script in background
+          ./switch_user.sh &
+          SWITCH_PID=$!
+          
+          # Wait for it to complete
+          sleep 5
+          
+          # Take screenshot after attempt
+          screenshot_file="$SCREENSHOT_DIR/04_after_login_attempt_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot after login attempt"
+
+      - name: Attempt Login Screen Capture Method 2
+        run: |
+          echo "=== Attempt 2: Using CGSession ==="
+          
+          # Take screenshot before CGSession
+          screenshot_file="$SCREENSHOT_DIR/05_before_cgsession_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot before CGSession"
+          
+          # Switch to Hamiya using CGSession
+          echo "Switching to Hamiya using CGSession..."
+          sudo /System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -switchToUser Hamiya &
+          CGSESSION_PID=$!
+          
+          # Wait for switch
+          sleep 3
+          
+          # Attempt to capture login screen with cliclick
+          echo "Attempting to capture with cliclick..."
+          
+          # Click at 17,19 (as requested)
+          cliclick c:17,19 2>/dev/null || echo "Click at 17,19 failed"
+          
+          # Take screenshot after click
+          screenshot_file="$SCREENSHOT_DIR/06_after_click_17_19_$(date +%H%M%S).png"
+          sudo screencapture -x "$screenshot_file" 2>/dev/null || echo "Screenshot failed"
+          echo "📸 Attempted screenshot after click at 17,19"
+          
+          # Click somewhere else (let's try 100,100)
+          cliclick c:100,100 2>/dev/null || echo "Click at 100,100 failed"
+          
+          # Take another screenshot
+          screenshot_file="$SCREENSHOT_DIR/07_after_click_100_100_$(date +%H%M%S).png"
+          sudo screencapture -x "$screenshot_file" 2>/dev/null || echo "Screenshot failed"
+          echo "📸 Attempted screenshot after click at 100,100"
+          
+          # Try to return to original user
+          echo "Attempting to return to original session..."
+          
+          # Kill CGSession process
+          kill $CGSESSION_PID 2>/dev/null || true
+          
+          # Try to switch back using CGSession with current user
+          CURRENT_USER=$(whoami)
+          sudo /System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -switchToUser $CURRENT_USER 2>/dev/null || true
+          
+          sleep 2
+
+      - name: Direct Login Screen Interaction Test
+        run: |
+          echo "=== Direct Login Screen Test ==="
+          
+          # Create a more aggressive test
+          echo "Creating test script for direct interaction..."
+          
+          cat > login_test.sh << 'EOF'
+          #!/bin/bash
+          
+          echo "Starting direct login screen test..."
+          
+          # Switch to login screen
+          echo "Switching to login screen..."
+          sudo /System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -suspend &
+          
+          # Wait for login screen
+          sleep 4
+          
+          # Now we should be at login screen
+          echo "At login screen, attempting interactions..."
+          
+          # Click at various positions to see if we can interact
+          for click_num in 1 2 3; do
+            echo "Click attempt $click_num..."
+            
+            # Different coordinates each time
+            case $click_num in
+              1) X=17 Y=19 ;;
+              2) X=100 Y=200 ;;
+              3) X=200 Y=100 ;;
+            esac
+            
+            # Try to click
+            /opt/homebrew/bin/cliclick c:$X,$Y 2>/dev/null || echo "Click failed at $X,$Y"
+            
+            # Try to take screenshot
+            sudo screencapture -x "$SCREENSHOT_DIR/login_screen_click_${click_num}_$(date +%H%M%S).png" 2>/dev/null || echo "Screenshot failed"
+            
             sleep 1
           done
           
-          # Give UI time to load
-          sleep 3
+          # Try to return from login screen
+          echo "Attempting to return..."
           
-          # Take screenshot after opening
-          screenshot_file="$SCREENSHOT_DIR/02_system_settings_open_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "✅ System Settings opened, screenshot saved"
-
-      - name: Click at 507,363
-        run: |
-          echo "=== Clicking at coordinates (507, 363) ==="
-          
-          # Take screenshot before click
-          screenshot_file="$SCREENSHOT_DIR/03_before_click_507_363_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot before click saved"
-          
-          # Click at coordinates (507, 363)
-          echo "Clicking at coordinates (507, 363)..."
-          cliclick c:507,363
-          
-          echo "✅ Click performed at (507, 363)"
-          
-          # Wait for action to complete
-          sleep 2
-          
-          # Take screenshot after click
-          screenshot_file="$SCREENSHOT_DIR/04_after_click_507_363_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot after click saved"
-
-      - name: Search for Fast User Switching
-        run: |
-          echo "=== Searching for 'Fast User Switching' ==="
-          
-          # Wait 5 seconds as requested
-          echo "Waiting 5 seconds..."
-          sleep 5
-          
-          # Take screenshot before search
-          screenshot_file="$SCREENSHOT_DIR/05_before_search_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot before search saved"
-          
-          # Activate System Settings window
-          echo "Activating System Settings window..."
-          osascript -e 'tell application "System Settings" to activate' 2>/dev/null || true
-          sleep 1
-          
-          # Use keyboard shortcut Cmd+F to open search
-          echo "Opening search with Cmd+F..."
-          osascript -e 'tell application "System Events" to keystroke "f" using command down'
-          sleep 1
-          
-          # Type "Fast User Switching" into search
-          echo "Typing 'Fast User Switching'..."
-          osascript -e 'tell application "System Events" to keystroke "Fast User Switching"'
-          sleep 2
-          
-          # Take screenshot after typing search
-          screenshot_file="$SCREENSHOT_DIR/06_search_typed_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot after search typed saved"
-          
-          # Press Enter to search
-          echo "Pressing Enter to search..."
-          osascript -e 'tell application "System Events" to key code 36'  # Enter key
-          sleep 3
-          
-          # Take screenshot of search results
-          screenshot_file="$SCREENSHOT_DIR/07_search_results_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot of search results saved"
-
-      - name: Click Sequence After Search
-        run: |
-          echo "=== Click Sequence After Search ==="
-          
-          # Click at 256,242
-          echo "Clicking at coordinates (256, 242)..."
-          cliclick c:256,242
-          sleep 1
-          screenshot_file="$SCREENSHOT_DIR/08_after_256_242_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot after click at (256, 242)"
-          
-          # Click at 827,202
-          echo "Clicking at coordinates (827, 202)..."
-          cliclick c:827,202
-          sleep 1
-          screenshot_file="$SCREENSHOT_DIR/09_after_827_202_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot after click at (827, 202)"
-          
-          # Click at 791,221
-          echo "Clicking at coordinates (791, 221)..."
-          cliclick c:791,221
-          sleep 1
-          screenshot_file="$SCREENSHOT_DIR/10_after_791_221_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot after click at (791, 221)"
-
-      - name: Top Bar Click Sequence (Attempt Login Screen Capture)
-        run: |
-          echo "=== Top Bar Click Sequence (Switch User) ==="
-          
-          # Take screenshot before switching user
-          screenshot_file="$SCREENSHOT_DIR/11_before_switch_user_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot before switch user saved"
-          
-          # Click at 785,7 (menu bar)
-          echo "Clicking at coordinates (785, 7)..."
-          cliclick c:785,7
-          sleep 2
-          screenshot_file="$SCREENSHOT_DIR/12_after_785_7_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file"
-          echo "📸 Screenshot after menu bar click"
-          
-          # Click at 710,73 (Switch User button for Hamiya)
-          echo "Clicking at coordinates (710, 73) - Switch User button..."
-          echo "⚠️ This will switch to login screen!"
-          
-          # Try multiple methods to capture login screen
-          echo "Attempting to prepare for login screen capture..."
-          
-          # Method 1: Try to use screencapture with loginwindow context
-          sudo screencapture -x "$SCREENSHOT_DIR/13_login_screen_attempt_$(date +%H%M%S).png" 2>/dev/null || echo "Could not capture login screen with sudo"
-          
-          # Now click the switch user button
-          cliclick c:710,73
-          
-          echo "✅ Switch User clicked. Waiting for login screen..."
-          
-          # Wait for login screen to appear
-          sleep 5
-          
-          # Try different methods to capture login screen
-          echo "Attempting to capture login screen..."
-          
-          # Method 2: Try with different contexts
-          sudo /usr/sbin/screencapture -x "$SCREENSHOT_DIR/14_login_screen_sudo_$(date +%H%M%S).png" 2>/dev/null || echo "Method 2 failed"
-          
-          # Method 3: Try using launchctl as root
-          echo "Trying alternative capture methods..."
-          
-          # Take a few more attempts
-          for i in {1..3}; do
-            sleep 2
-            # This might capture the login screen if we're lucky
-            sudo screencapture -x "$SCREENSHOT_DIR/15_login_attempt_${i}_$(date +%H%M%S).png" 2>/dev/null || true
-            echo "Login screen capture attempt $i"
-          done
-
-      - name: Return to Current Session
-        run: |
-          echo "=== Attempting to Return to Current Session ==="
-          
-          # Try to return to original user session
-          echo "Attempting keyboard shortcuts to return..."
-          
-          # Press Escape key (might help in some cases)
+          # Press Escape key (might wake from screensaver/login)
           osascript -e 'tell application "System Events" to key code 53' 2>/dev/null || true
-          sleep 1
           
-          # Try Command+Tab to switch apps
-          osascript -e 'tell application "System Events" to keystroke tab using command down' 2>/dev/null || true
-          sleep 1
+          # Press Enter
+          osascript -e 'tell application "System Events" to key code 36' 2>/dev/null || true
           
-          # Try to login with current user (if we're at login screen)
-          # Type password and press Enter (using the runner user password)
-          echo "Attempting to return to session..."
+          # Try to switch back to current user
+          CURRENT_USER=$(whoami)
+          sudo /System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -switchToUser $CURRENT_USER 2>/dev/null || true
           
-          # Take screenshot of whatever state we're in
-          screenshot_file="$SCREENSHOT_DIR/16_return_attempt_$(date +%H%M%S).png"
-          sudo screencapture -x "$screenshot_file" 2>/dev/null || screencapture -x "$screenshot_file"
-          echo "📸 Screenshot of current state saved"
+          echo "Direct test completed"
+          EOF
+          
+          chmod +x login_test.sh
+          
+          # Run the test
+          ./login_test.sh &
+          LOGIN_TEST_PID=$!
+          
+          # Wait for test to complete
+          sleep 10
+          
+          # Take final screenshot
+          screenshot_file="$SCREENSHOT_DIR/08_after_direct_test_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Final screenshot after direct test"
 
-      - name: Continuous Screenshot Capture (If Still in Session)
+      - name: Post-Test Screenshots
         run: |
-          echo "=== Continuous Screenshot Capture (If Available) ==="
+          echo "=== Post-Test Verification ==="
           
-          # Check if we can still take screenshots
-          if pgrep -f "loginwindow" > /dev/null; then
-            echo "⚠️ Login window active, screenshots may not work as expected"
-          fi
+          # Check if we're back to normal
+          echo "Checking current session..."
+          whoami
           
-          echo "Attempting to take 15 screenshots over 15 seconds..."
-          
-          for i in {1..15}; do
-            screenshot_file="$SCREENSHOT_DIR/17_continuous_${i}_$(date +%H%M%S).png"
-            
-            # Try both regular and sudo methods
-            screencapture -x "$screenshot_file" 2>/dev/null || sudo screencapture -x "$screenshot_file" 2>/dev/null || true
-            
-            echo "📸 Screenshot attempt $i/15"
-            
-            # Wait 1 second between screenshots
-            if [ $i -lt 15 ]; then
-              sleep 1
-            fi
+          # Take several verification screenshots
+          for i in {1..5}; do
+            screenshot_file="$SCREENSHOT_DIR/09_post_test_${i}_$(date +%H%M%S).png"
+            screencapture -x "$screenshot_file"
+            echo "📸 Post-test screenshot $i"
+            sleep 1
           done
-          
-          echo "✅ Continuous screenshot attempts complete"
 
-      - name: Capture System Information
+      - name: Capture Test Information
         run: |
-          echo "=== Capturing System Information ==="
+          echo "=== Capturing Test Information ==="
           
-          INFO_FILE="$SCREENSHOT_DIR/system_info.txt"
+          INFO_FILE="$SCREENSHOT_DIR/test_info.txt"
           
-          echo "macOS User Management Test Report" > "$INFO_FILE"
-          echo "=================================" >> "$INFO_FILE"
+          echo "macOS Login Screen Capture Test Report" > "$INFO_FILE"
+          echo "=====================================" >> "$INFO_FILE"
           echo "Test Date: $(date)" >> "$INFO_FILE"
           echo "macOS Version: $(sw_vers -productVersion)" >> "$INFO_FILE"
+          echo "Current User: $(whoami)" >> "$INFO_FILE"
           echo "" >> "$INFO_FILE"
           
-          echo "System Configuration:" >> "$INFO_FILE"
-          echo "-------------------" >> "$INFO_FILE"
-          
-          # Check multiple session settings
-          echo "Multiple Session Settings:" >> "$INFO_FILE"
-          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled 2>/dev/null >> "$INFO_FILE" || echo "Not set" >> "$INFO_FILE"
-          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionName 2>/dev/null >> "$INFO_FILE" || echo "Not set" >> "$INFO_FILE"
+          echo "Test User Information:" >> "$INFO_FILE"
+          echo "---------------------" >> "$INFO_FILE"
+          echo "Created User: Hamiya" >> "$INFO_FILE"
+          echo "User Password: Hamza@157" >> "$INFO_FILE"
+          echo "Is Admin: $(dscl . -read /Groups/admin GroupMembership | grep -q Hamiya && echo "Yes" || echo "No")" >> "$INFO_FILE"
           echo "" >> "$INFO_FILE"
           
-          # Check created user
-          echo "User Information:" >> "$INFO_FILE"
-          id Hamiya 2>/dev/null >> "$INFO_FILE" || echo "User not found" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          # Check admin group membership
-          echo "Admin Group Members:" >> "$INFO_FILE"
-          dscl . read /Groups/admin GroupMembership 2>/dev/null >> "$INFO_FILE" || echo "Could not read admin group" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          # Get screen resolution
-          echo "Screen Resolution:" >> "$INFO_FILE"
-          system_profiler SPDisplaysDataType 2>/dev/null | grep -A1 "Resolution:" | tail -1 >> "$INFO_FILE" || echo "Unknown" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
-          
-          echo "Test Actions Performed:" >> "$INFO_FILE"
+          echo "Test Methods Attempted:" >> "$INFO_FILE"
           echo "----------------------" >> "$INFO_FILE"
-          echo "1. Enabled MultipleSessionEnabled and set MultipleSessionName" >> "$INFO_FILE"
-          echo "2. Created user 'Hamiya' with admin privileges" >> "$INFO_FILE"
-          echo "3. Opened System Settings" >> "$INFO_FILE"
-          echo "4. Clicked at coordinates (507, 363)" >> "$INFO_FILE"
-          echo "5. Searched for 'Fast User Switching'" >> "$INFO_FILE"
-          echo "6. Click sequence after search:" >> "$INFO_FILE"
-          echo "   - Clicked at (256, 242)" >> "$INFO_FILE"
-          echo "   - Clicked at (827, 202)" >> "$INFO_FILE"
-          echo "   - Clicked at (791, 221)" >> "$INFO_FILE"
-          echo "7. Top bar click sequence:" >> "$INFO_FILE"
-          echo "   - Clicked at (785, 7) - Menu bar" >> "$INFO_FILE"
-          echo "   - Clicked at (710, 73) - Switch User button for Hamiya" >> "$INFO_FILE"
-          echo "8. Attempted login screen capture with multiple methods" >> "$INFO_FILE"
-          echo "9. Attempted to return to original session" >> "$INFO_FILE"
-          echo "10. Continuous screenshot attempts" >> "$INFO_FILE"
+          echo "1. sudo login Hamiya" >> "$INFO_FILE"
+          echo "2. CGSession -switchToUser Hamiya" >> "$INFO_FILE"
+          echo "3. Direct login screen interaction with cliclick" >> "$INFO_FILE"
           echo "" >> "$INFO_FILE"
           
-          echo "⚠️ IMPORTANT NOTE:" >> "$INFO_FILE"
-          echo "When clicking the 'Switch User' button, macOS switches to the login screen," >> "$INFO_FILE"
-          echo "which is a separate security context. Regular screenshot commands from the" >> "$INFO_FILE"
-          echo "current user session cannot capture the login screen. We attempted sudo" >> "$INFO_FILE"
-          echo "screencapture, but this may still not work due to macOS security restrictions." >> "$INFO_FILE"
+          echo "Click Coordinates Tested:" >> "$INFO_FILE"
+          echo "------------------------" >> "$INFO_FILE"
+          echo "• (17, 19) - Primary test coordinate" >> "$INFO_FILE"
+          echo "• (100, 100) - Secondary test" >> "$INFO_FILE"
+          echo "• (100, 200) - Additional test" >> "$INFO_FILE"
+          echo "• (200, 100) - Additional test" >> "$INFO_FILE"
+          echo "" >> "$INFO_FILE"
+          
+          echo "Technical Notes:" >> "$INFO_FILE"
+          echo "---------------" >> "$INFO_FILE"
+          echo "• GitHub Actions runners typically run as '_runner' or similar service account" >> "$INFO_FILE"
+          echo "• Login screen capture is challenging due to macOS security (TCC, Screen Recording permissions)" >> "$INFO_FILE"
+          echo "• The login screen runs in a separate, secure context (WindowServer)" >> "$INFO_FILE"
+          echo "• Direct GUI automation of login screen may not work in headless/CI environments" >> "$INFO_FILE"
           echo "" >> "$INFO_FILE"
           
           echo "Screenshots Captured:" >> "$INFO_FILE"
@@ -376,31 +309,27 @@ jobs:
           
           echo "" >> "$INFO_FILE"
           echo "Total screenshots: $(find "$SCREENSHOT_DIR" -name "*.png" | wc -l)" >> "$INFO_FILE"
-          
-          echo "✅ System information saved"
 
-      - name: Cleanup and Return
+      - name: Cleanup
         run: |
           echo "=== Final Cleanup ==="
           
-          # Try to return to desktop if stuck
-          echo "Attempting to ensure we're back at desktop..."
+          # Make sure we're back to normal state
+          echo "Ensuring clean state..."
           
-          # Try common keyboard shortcuts
-          for key in 53 36 48; do  # Escape, Enter, Tab
-            osascript -e "tell application \"System Events\" to key code $key" 2>/dev/null || true
-            sleep 1
-          done
+          # Kill any remaining processes
+          pkill -f "CGSession" 2>/dev/null || true
+          pkill -f "login" 2>/dev/null || true
           
-          # Take final screenshot
-          screenshot_file="$SCREENSHOT_DIR/final_state_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_file" 2>/dev/null || sudo screencapture -x "$screenshot_file" 2>/dev/null || true
-          echo "📸 Final state screenshot saved"
+          # Take one final screenshot
+          screenshot_file="$SCREENSHOT_DIR/final_complete_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Final completion screenshot"
 
       - name: Upload Screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: macos-user-management-screenshots
+          name: login-screen-capture-test
           path: |
             ${{ env.SCREENSHOT_DIR }}
           retention-days: 7
@@ -409,41 +338,40 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: macos-user-management-summary
+          name: login-screen-test-summary
           path: |
-            ${{ env.SCREENSHOT_DIR }}/system_info.txt
+            ${{ env.SCREENSHOT_DIR }}/test_info.txt
           retention-days: 7
 
       - name: Final Report
         run: |
-          echo "=== macOS User Management Test Complete ==="
+          echo "=== Login Screen Capture Test Complete ==="
           echo ""
           echo "📊 Summary:"
           echo "  ✅ macOS Version: $(sw_vers -productVersion)"
-          echo "  ✅ Multiple sessions enabled"
-          echo "  ✅ User 'Hamiya' created with admin privileges"
-          echo "  ✅ System Settings opened and tested"
+          echo "  ✅ User 'Hamiya' created with password 'Hamza@157'"
+          echo "  ✅ User added to admin group"
           SCREENSHOT_COUNT=$(find "$SCREENSHOT_DIR" -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
-          echo "  ✅ $SCREENSHOT_COUNT screenshots captured"
+          echo "  ✅ $SCREENSHOT_COUNT screenshots attempted"
           echo ""
-          echo "⚠️ IMPORTANT: Login Screen Capture Challenge"
-          echo "-------------------------------------------"
-          echo "When clicking the 'Switch User' button at (710, 73), macOS switches"
-          echo "to the login screen, which is a separate secure context."
+          echo "🔄 Methods Tested:"
+          echo "  1. sudo login Hamiya"
+          echo "  2. CGSession -switchToUser Hamiya"
+          echo "  3. Direct login screen interaction"
           echo ""
-          echo "Regular screenshot commands from a user session cannot capture"
-          echo "the login screen due to macOS security restrictions (TCC permissions,"
-          echo "Screen Recording permissions, and secure input contexts)."
+          echo "🎯 Actions Performed:"
+          echo "  • Clicked at (17, 19) on login screen"
+          echo "  • Clicked at other test coordinates"
+          echo "  • Attempted multiple screenshot captures"
           echo ""
-          echo "We attempted multiple methods:"
-          echo "  • sudo screencapture"
-          echo "  • Different capture contexts"
-          echo "  • Multiple timing attempts"
+          echo "⚠️ Important Note:"
+          echo "Login screen capture in CI environments is challenging due to:"
+          echo "  • macOS security restrictions (TCC)"
+          echo "  • Screen Recording permissions"
+          echo "  • Headless environment limitations"
+          echo "  • Secure input context of login screen"
           echo ""
-          echo "Some screenshots may show black screens or fail due to these restrictions."
+          echo "Some screenshots may be black or fail due to these restrictions."
           echo ""
-          echo "📁 Artifacts:"
-          echo "  • Screenshots uploaded as 'macos-user-management-screenshots'"
-          echo "  • Test summary uploaded as 'macos-user-management-summary'"
-          echo ""
-          echo "✅ All tasks completed! Login screen capture attempted with limitations."
+          echo "📁 Artifacts uploaded for review."
+          echo "✅ Test completed!"
