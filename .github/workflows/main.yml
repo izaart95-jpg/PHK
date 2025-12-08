@@ -1,88 +1,120 @@
-name: VNC Viewer macOS Testing
+name: Sunshine macOS Testing with Tailscale
 
 on:
   workflow_dispatch:
 
 jobs:
-  vnc-viewer-test:
+  sunshine-tailscale-test:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Check macOS Version
         run: |
           echo "=== macOS Version ==="
           sw_vers
+          echo "Architecture: $(uname -m)"
           system_profiler SPSoftwareDataType | grep "System Version"
 
-      - name: Download VNC Viewer
+      - name: Install Homebrew
         run: |
-          echo "=== Downloading VNC Viewer ==="
+          echo "=== Installing Homebrew ==="
           
-          # Create directory for downloads
-          mkdir -p downloads
-          
-          # Download VNC Viewer DMG
-          VNC_URL="https://downloads.realvnc.com/download/file/viewer.files/VNC-Viewer-7.15.1-MacOSX-universal.dmg?lai_vid=AX4E8ExGpskbQ&lai_sr=0-4&lai_sl=l"
-          DMG_PATH="downloads/VNC-Viewer.dmg"
-          
-          echo "Downloading VNC Viewer from: ${VNC_URL}"
-          curl -L -o "$DMG_PATH" "$VNC_URL"
-          
-          # Verify download
-          if [ -f "$DMG_PATH" ]; then
-            file_size=$(ls -lh "$DMG_PATH" | awk '{print $5}')
-            echo "✅ Download successful: $file_size"
-            echo "DMG_PATH=$DMG_PATH" >> $GITHUB_ENV
-          else
-            echo "❌ Download failed!"
-            exit 1
-          fi
-
-      - name: Install VNC Viewer
-        run: |
-          echo "=== Installing VNC Viewer ==="
-          
-          # Mount DMG
-          echo "Mounting DMG..."
-          MOUNT_PATH="/Volumes/VNC Viewer"
-          hdiutil attach "$DMG_PATH" -nobrowse
-          
-          # Check what's in the DMG
-          echo "Contents of DMG:"
-          ls -la "/Volumes/VNC Viewer" || true
-          
-          # Install to Applications
-          echo "Installing to Applications..."
-          if [ -f "/Volumes/VNC Viewer/VNC Viewer.app" ]; then
-            cp -R "/Volumes/VNC Viewer/VNC Viewer.app" "/Applications/"
-            echo "✅ VNC Viewer installed to Applications"
-          elif [ -f "/Volumes/VNC Viewer/VNC-Viewer.app" ]; then
-            cp -R "/Volumes/VNC Viewer/VNC-Viewer.app" "/Applications/"
-            echo "✅ VNC Viewer installed to Applications"
-          else
-            # Try to find any .app file
-            APP_FILE=$(find "/Volumes/VNC Viewer" -name "*.app" -maxdepth 1 | head -1)
-            if [ -n "$APP_FILE" ]; then
-              cp -R "$APP_FILE" "/Applications/"
-              echo "✅ VNC Viewer installed from: $(basename "$APP_FILE")"
-            else
-              echo "❌ No .app file found in DMG!"
-              exit 1
+          # Check if Homebrew is already installed
+          if ! command -v brew &> /dev/null; then
+            echo "Installing Homebrew..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            
+            # Add Homebrew to PATH for Intel
+            if [ "$(uname -m)" = "x86_64" ]; then
+              echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile
+              eval "$(/usr/local/bin/brew shellenv)"
+            # Add Homebrew to PATH for Apple Silicon
+            elif [ "$(uname -m)" = "arm64" ]; then
+              echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+              eval "$(/opt/homebrew/bin/brew shellenv)"
             fi
+          else
+            echo "✅ Homebrew already installed"
+            brew --version
           fi
           
-          # Unmount DMG
-          hdiutil detach "/Volumes/VNC Viewer" -force 2>/dev/null || true
+          # Update Homebrew
+          brew update
+
+      - name: Install Tailscale
+        run: |
+          echo "=== Installing Tailscale ==="
+          
+          # Install Tailscale via Homebrew
+          brew install tailscale
+          
+          # Start Tailscale
+          echo "Starting Tailscale..."
+          sudo tailscale up --authkey tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf
+          
+          # Check Tailscale status
+          echo "Tailscale status:"
+          tailscale status
+          
+          # Get Tailscale IP
+          TAILSCALE_IP=$(tailscale ip -4)
+          echo "Tailscale IP: $TAILSCALE_IP"
+          echo "TAILSCALE_IP=$TAILSCALE_IP" >> $GITHUB_ENV
+
+      - name: Install Sunshine via LizardByte Tap
+        run: |
+          echo "=== Installing Sunshine ==="
+          
+          # Add LizardByte tap
+          echo "Adding LizardByte/homebrew tap..."
+          brew tap LizardByte/homebrew
+          
+          # Install Sunshine
+          echo "Installing Sunshine..."
+          brew install sunshine
           
           # Verify installation
-          if [ -d "/Applications/VNC Viewer.app" ]; then
-            echo "✅ Installation verified: /Applications/VNC Viewer.app"
-          elif [ -d "/Applications/VNC-Viewer.app" ]; then
-            echo "✅ Installation verified: /Applications/VNC-Viewer.app"
-            # Create alias for easier reference
-            ln -s "/Applications/VNC-Viewer.app" "/Applications/VNC Viewer.app" 2>/dev/null || true
-          fi
+          echo "Sunshine installation verification:"
+          which sunshine
+          ls -la "$(which sunshine)"
+          
+          # Create Sunshine config directory
+          mkdir -p ~/.config/sunshine
+          echo "Sunshine config directory created"
+
+      - name: Configure Sunshine
+        run: |
+          echo "=== Configuring Sunshine ==="
+          
+          # Create basic Sunshine config
+          SUNSHINE_CONFIG=~/.config/sunshine/sunshine.conf
+          
+          cat > "$SUNSHINE_CONFIG" << EOF
+          # Sunshine Configuration
+          # Generated for GitHub Actions test
+          
+          [nvhttp]
+          port = 47989
+          pkey = sunshine
+          cert = sunshine
+          
+          [app]
+          sources = 1
+          
+          [video]
+          encoder = nvenc
+          output = 1280x720
+          fps = 30
+          
+          # Add Tailscale IP for external access
+          [external_ip]
+          address = ${{ env.TAILSCALE_IP }}
+          EOF
+          
+          echo "Sunshine configuration created at: $SUNSHINE_CONFIG"
+          echo "Configuration content:"
+          cat "$SUNSHINE_CONFIG"
 
       - name: Create Screenshot Directory
         run: |
@@ -92,11 +124,13 @@ jobs:
           
           # Create metadata file
           METADATA_FILE="$SCREENSHOT_DIR/metadata.txt"
-          echo "VNC Viewer Test Session" > "$METADATA_FILE"
-          echo "======================" >> "$METADATA_FILE"
+          echo "Sunshine + Tailscale Test Session" > "$METADATA_FILE"
+          echo "=================================" >> "$METADATA_FILE"
           echo "Date: $(date)" >> "$METADATA_FILE"
           echo "macOS Version: $(sw_vers -productVersion)" >> "$METADATA_FILE"
-          echo "VNC Viewer Version: 7.15.1" >> "$METADATA_FILE"
+          echo "Architecture: $(uname -m)" >> "$METADATA_FILE"
+          echo "Tailscale IP: ${{ env.TAILSCALE_IP }}" >> "$METADATA_FILE"
+          echo "Sunshine Version: $(sunshine --version 2>/dev/null || echo 'Unknown')" >> "$METADATA_FILE"
           echo "" >> "$METADATA_FILE"
 
       - name: Get Display Information
@@ -117,327 +151,255 @@ jobs:
             echo "Detected resolution: $RESOLUTION"
           fi
           
-          WIDTH=$(echo "$RESOLUTION" | cut -d'x' -f1)
-          HEIGHT=$(echo "$RESOLUTION" | cut -d'x' -f2)
-          
           echo "RESOLUTION=$RESOLUTION" >> $GITHUB_ENV
-          echo "SCREEN_WIDTH=$WIDTH" >> $GITHUB_ENV
-          echo "SCREEN_HEIGHT=$HEIGHT" >> $GITHUB_ENV
+          echo "=== Display Info ===" >> "$SCREENSHOT_DIR/metadata.txt"
+          echo "Resolution: $RESOLUTION" >> "$SCREENSHOT_DIR/metadata.txt"
 
-      - name: Initial System Screenshot
+      - name: Start Sunshine Service
         run: |
-          echo "=== Taking Initial System Screenshot ==="
+          echo "=== Starting Sunshine ==="
           
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          screenshot_file="$SCREENSHOT_DIR/01_initial_desktop_$timestamp.png"
-          
-          screencapture -x "$screenshot_file"
-          
-          if [ -f "$screenshot_file" ]; then
-            filesize=$(ls -lh "$screenshot_file" | awk '{print $5}')
-            echo "✅ Initial screenshot: $screenshot_file ($filesize)"
-          else
-            echo "⚠️ Failed to take initial screenshot"
-          fi
-
-      - name: Launch VNC Viewer
-        run: |
-          echo "=== Launching VNC Viewer ==="
-          
-          # Clean up any existing instances
-          pkill -f "VNC Viewer" 2>/dev/null || true
+          # Kill any existing Sunshine processes
+          pkill -f sunshine 2>/dev/null || true
           sleep 2
           
-          # Launch VNC Viewer
-          if [ -d "/Applications/VNC Viewer.app" ]; then
-            echo "Launching VNC Viewer from /Applications/VNC Viewer.app"
-            open -a "/Applications/VNC Viewer.app"
-            APP_NAME="VNC Viewer"
-          elif [ -d "/Applications/VNC-Viewer.app" ]; then
-            echo "Launching VNC Viewer from /Applications/VNC-Viewer.app"
-            open -a "/Applications/VNC-Viewer.app"
-            APP_NAME="VNC-Viewer"
+          # Start Sunshine in the background
+          echo "Starting Sunshine service..."
+          sunshine --creds &> "$SCREENSHOT_DIR/sunshine_start.log" &
+          SUNSHINE_PID=$!
+          echo "SUNSHINE_PID=$SUNSHINE_PID" >> $GITHUB_ENV
+          
+          # Wait for Sunshine to start
+          echo "Waiting for Sunshine to initialize..."
+          sleep 10
+          
+          # Check if Sunshine is running
+          if ps -p $SUNSHINE_PID > /dev/null; then
+            echo "✅ Sunshine started successfully (PID: $SUNSHINE_PID)"
+            echo "Sunshine PID: $SUNSHINE_PID" >> "$SCREENSHOT_DIR/metadata.txt"
           else
-            echo "❌ VNC Viewer not found in Applications!"
-            exit 1
+            echo "⚠️ Sunshine may not have started correctly"
+            echo "Check log: $SCREENSHOT_DIR/sunshine_start.log"
+            cat "$SCREENSHOT_DIR/sunshine_start.log"
           fi
           
-          echo "APP_NAME=$APP_NAME" >> $GITHUB_ENV
+          # Check listening ports
+          echo "Checking listening ports..."
+          lsof -i -P -n | grep LISTEN | grep -E "(sunshine|47989)" || true
+
+      - name: Initial Screenshots (5 screenshots, 1 per second)
+        run: |
+          echo "=== Taking 5 Initial Screenshots (1 per second) ==="
           
-          # Wait for app to launch
-          echo "Waiting for VNC Viewer to launch..."
-          for i in {1..30}; do
-            if pgrep -f "$APP_NAME" > /dev/null; then
-              echo "✅ $APP_NAME process found (attempt $i)"
-              break
+          for i in {1..5}; do
+            timestamp=$(date +%Y%m%d_%H%M%S)
+            screenshot_file="$SCREENSHOT_DIR/01_initial_${i}_${timestamp}.png"
+            
+            echo "Taking screenshot $i..."
+            screencapture -x "$screenshot_file"
+            
+            if [ -f "$screenshot_file" ]; then
+              filesize=$(ls -lh "$screenshot_file" | awk '{print $5}')
+              echo "✅ Screenshot $i: $filesize"
+              
+              # Add to metadata
+              echo "Screenshot $i: $(basename "$screenshot_file") ($filesize)" >> "$SCREENSHOT_DIR/metadata.txt"
+            else
+              echo "⚠️ Failed to take screenshot $i"
             fi
-            sleep 1
+            
+            # Wait 1 second between screenshots
+            if [ $i -lt 5 ]; then
+              sleep 1
+            fi
           done
           
-          # Additional wait for UI to load
-          sleep 5
-          
-          # Take screenshot after launch
-          launch_file="$SCREENSHOT_DIR/02_after_launch_$(date +%H%M%S).png"
-          screencapture -x "$launch_file"
-          echo "📸 Launch screenshot taken"
+          echo "✅ Initial screenshot sequence complete"
 
-      - name: Interact with VNC Viewer
+      - name: Upload Initial Screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: sunshine-initial-screenshots
+          path: ${{ env.SCREENSHOT_DIR }}/01_initial_*.png
+          retention-days: 7
+
+      - name: Extended Monitoring (10 minutes, 2 screenshots per minute)
         run: |
-          echo "=== Interacting with VNC Viewer ==="
+          echo "=== Starting 10-Minute Extended Monitoring ==="
+          echo "Will take 2 screenshots per minute for 10 minutes"
+          echo "Total: 20 additional screenshots"
           
-          # Wait a bit more for UI to stabilize
-          sleep 3
+          # Calculate total minutes
+          TOTAL_MINUTES=10
+          SCREENSHOTS_PER_MINUTE=2
+          TOTAL_SCREENSHOTS=$((TOTAL_MINUTES * SCREENSHOTS_PER_MINUTE))
           
-          # Take screenshot of main window
-          main_window_file="$SCREENSHOT_DIR/03_main_window_$(date +%H%M%S).png"
-          screencapture -x "$main_window_file"
-          echo "✅ Main window screenshot"
+          echo "Duration: $TOTAL_MINUTES minutes"
+          echo "Screenshots per minute: $SCREENSHOTS_PER_MINUTE"
+          echo "Total expected screenshots: $TOTAL_SCREENSHOTS"
+          echo ""
+          echo "Starting at: $(date)"
           
-          # Try to interact with the UI using AppleScript
-          echo "Attempting to interact with VNC Viewer UI..."
+          # Create monitoring log
+          MONITOR_LOG="$SCREENSHOT_DIR/monitoring.log"
+          echo "Extended Monitoring Log" > "$MONITOR_LOG"
+          echo "======================" >> "$MONITOR_LOG"
+          echo "Start time: $(date)" >> "$MONITOR_LOG"
+          echo "Duration: $TOTAL_MINUTES minutes" >> "$MONITOR_LOG"
           
-          /usr/bin/osascript <<'EOF' || echo "AppleScript interaction attempted"
-          tell application "System Events"
-            delay 2
+          # Monitor loop
+          for minute in $(seq 1 $TOTAL_MINUTES); do
+            echo ""
+            echo "=== Minute $minute/$TOTAL_MINUTES ==="
+            echo "Minute $minute started at: $(date +%H:%M:%S)" >> "$MONITOR_LOG"
             
-            -- Try to find VNC Viewer process
-            if exists process "VNC Viewer" then
-              tell process "VNC Viewer"
-                -- Activate the application
-                activate
-                delay 1
+            # Take screenshots for this minute
+            for shot_num in $(seq 1 $SCREENSHOTS_PER_MINUTE); do
+              screenshot_counter=$(((minute - 1) * SCREENSHOTS_PER_MINUTE + shot_num + 5))
+              
+              # Format counter with leading zeros
+              counter_formatted=$(printf "%02d" $screenshot_counter)
+              timestamp=$(date +%Y%m%d_%H%M%S)
+              screenshot_file="$SCREENSHOT_DIR/${counter_formatted}_monitoring_${timestamp}.png"
+              
+              echo "Taking screenshot $counter_formatted..."
+              screencapture -x "$screenshot_file"
+              
+              if [ -f "$screenshot_file" ]; then
+                filesize=$(ls -lh "$screenshot_file" | awk '{print $5}')
+                echo "✅ Screenshot $counter_formatted: $filesize"
                 
-                -- Try to get window information
-                try
-                  set windowNames to name of every window
-                  log "VNC Viewer Windows: " & (count of windowNames)
-                  
-                  -- Take a screenshot after activation
-                  do shell script "screencapture -x $SCREENSHOT_DIR/04_after_activate_$(date +%H%M%S).png"
-                  
-                  -- Try to click in common locations (center of screen)
-                  set screenWidth to 1440
-                  set screenHeight to 900
-                  
-                  -- Click in the center (where connection dialog might be)
-                  click at {screenWidth / 2, screenHeight / 2}
-                  delay 1
-                  
-                  -- Take screenshot after click
-                  do shell script "screencapture -x $SCREENSHOT_DIR/05_after_center_click_$(date +%H%M%S).png"
-                  
-                  -- Press Escape to close any dialogs
-                  key code 53
-                  delay 1
-                  
-                on error errMsg
-                  log "Error interacting with VNC Viewer: " & errMsg
-                end try
-              end tell
-            else
-              log "VNC Viewer process not found"
-            end if
-          end tell
-          EOF
-          
-          # Additional screenshots of UI state
-          sleep 2
-          after_interaction_file="$SCREENSHOT_DIR/06_after_interaction_$(date +%H%M%S).png"
-          screencapture -x "$after_interaction_file"
-          echo "✅ Post-interaction screenshot"
-
-      - name: Test Common UI Actions
-        run: |
-          echo "=== Testing Common UI Actions ==="
-          
-          # Install cliclick for precise clicking if needed
-          if ! command -v cliclick &> /dev/null; then
-            echo "Installing cliclick for precise clicking..."
-            brew install cliclick
-          fi
-          
-          # Take screenshot before actions
-          before_actions_file="$SCREENSHOT_DIR/07_before_actions_$(date +%H%M%S).png"
-          screencapture -x "$before_actions_file"
-          
-          # Define click positions (relative to typical VNC Viewer UI)
-          # These are educated guesses based on typical UI layouts
-          CENTER_X=$((SCREEN_WIDTH / 2))
-          CENTER_Y=$((SCREEN_HEIGHT / 2))
-          
-          TOP_CENTER_X=$CENTER_X
-          TOP_CENTER_Y=$((SCREEN_HEIGHT / 4))
-          
-          BOTTOM_RIGHT_X=$((SCREEN_WIDTH * 3 / 4))
-          BOTTOM_RIGHT_Y=$((SCREEN_HEIGHT * 3 / 4))
-          
-          echo "Click positions:"
-          echo "  Center: ($CENTER_X, $CENTER_Y)"
-          echo "  Top Center: ($TOP_CENTER_X, $TOP_CENTER_Y)"
-          echo "  Bottom Right: ($BOTTOM_RIGHT_X, $BOTTOM_RIGHT_Y)"
-          
-          # Perform clicks with delays
-          echo "Performing UI clicks..."
-          
-          # Click center (where connection field might be)
-          cliclick c:$CENTER_X,$CENTER_Y
-          sleep 1
-          screenshot_center="$SCREENSHOT_DIR/08_after_center_click_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_center"
-          
-          # Click top center (where menu bar might be)
-          cliclick c:$TOP_CENTER_X,$TOP_CENTER_Y
-          sleep 1
-          screenshot_top="$SCREENSHOT_DIR/09_after_top_click_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_top"
-          
-          # Click bottom right (where buttons might be)
-          cliclick c:$BOTTOM_RIGHT_X,$BOTTOM_RIGHT_Y
-          sleep 1
-          screenshot_bottom="$SCREENSHOT_DIR/10_after_bottom_click_$(date +%H%M%S).png"
-          screencapture -x "$screenshot_bottom"
-          
-          echo "✅ UI action testing complete"
-
-      - name: Test Menu Access
-        run: |
-          echo "=== Testing Menu Access ==="
-          
-          # Try to access menu using AppleScript
-          /usr/bin/osascript <<'EOF' 2>&1 | tee -a "$SCREENSHOT_DIR/menu_test.log" || true
-          tell application "System Events"
-            delay 1
+                # Log to monitoring file
+                echo "  Screenshot $counter_formatted: $(basename "$screenshot_file") ($filesize)" >> "$MONITOR_LOG"
+              else
+                echo "⚠️ Failed to take screenshot $counter_formatted"
+              fi
+              
+              # Wait between screenshots in the same minute (except after last)
+              if [ $shot_num -lt $SCREENSHOTS_PER_MINUTE ]; then
+                sleep 30  # 30 seconds between screenshots in same minute
+              fi
+            done
             
-            -- Try to activate menu bar
-            if exists process "VNC Viewer" then
-              tell process "VNC Viewer"
-                activate
-                delay 1
-                
-                -- Try to click on menu bar items
-                try
-                  -- Click on Apple menu (always at top-left)
-                  click at {20, 20}
-                  delay 1
-                  
-                  -- Take screenshot of menu
-                  do shell script "screencapture -x $SCREENSHOT_DIR/11_menu_display_$(date +%H%M%S).png"
-                  
-                  -- Press Escape to close menu
-                  key code 53
-                  delay 1
-                  
-                  -- Try File menu (common position)
-                  click at {100, 20}
-                  delay 1
-                  do shell script "screencapture -x $SCREENSHOT_DIR/12_file_menu_$(date +%H%M%S).png"
-                  key code 53
-                  
-                on error errMsg
-                  log "Menu test error: " & errMsg
-                end try
-              end tell
-            end if
-          end tell
-          EOF
+            # Wait for next minute (unless this is the last minute)
+            if [ $minute -lt $TOTAL_MINUTES ]; then
+              echo "Waiting for next minute..."
+              sleep 30  # Already waited 30 seconds for second screenshot
+            fi
+            
+            # Log system info every 2 minutes
+            if [ $((minute % 2)) -eq 0 ]; then
+              echo "System status at minute $minute:" >> "$MONITOR_LOG"
+              echo "CPU: $(ps -A -o %cpu | awk '{s+=$1} END {print s "%"}')" >> "$MONITOR_LOG"
+              echo "Memory: $(memory_pressure | grep -E "System-wide memory free percentage:|System-wide memory free percentage")" >> "$MONITOR_LOG"
+              
+              # Check if Sunshine is still running
+              if ps -p ${{ env.SUNSHINE_PID }} > /dev/null 2>&1; then
+                echo "Sunshine: Running (PID: ${{ env.SUNSHINE_PID }})" >> "$MONITOR_LOG"
+              else
+                echo "Sunshine: NOT RUNNING" >> "$MONITOR_LOG"
+              fi
+            fi
+          done
           
-          # Final screenshot after menu tests
-          sleep 2
-          final_menu_file="$SCREENSHOT_DIR/13_final_menu_test_$(date +%H%M%S).png"
-          screencapture -x "$final_menu_file"
+          echo ""
+          echo "✅ Extended monitoring complete!"
+          echo "End time: $(date)" >> "$MONITOR_LOG"
+          echo "Total monitoring duration: $TOTAL_MINUTES minutes" >> "$MONITOR_LOG"
 
-      - name: Capture Application Info
+      - name: Final System Check
         run: |
-          echo "=== Capturing Application Information ==="
+          echo "=== Final System Check ==="
           
-          INFO_FILE="$SCREENSHOT_DIR/application_info.txt"
+          # Create system check file
+          SYSTEM_CHECK="$SCREENSHOT_DIR/system_check.txt"
           
-          echo "VNC Viewer Application Details" > "$INFO_FILE"
-          echo "=============================" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
+          echo "Final System Status" > "$SYSTEM_CHECK"
+          echo "===================" >> "$SYSTEM_CHECK"
+          echo "Check time: $(date)" >> "$SYSTEM_CHECK"
+          echo "" >> "$SYSTEM_CHECK"
           
-          # Get app location
-          echo "Application Locations:" >> "$INFO_FILE"
-          ls -la "/Applications/" | grep -i vnc >> "$INFO_FILE" || echo "Not found" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
+          # Check running processes
+          echo "Running Processes:" >> "$SYSTEM_CHECK"
+          echo "-----------------" >> "$SYSTEM_CHECK"
+          ps aux | grep -E "(sunshine|tailscale)" | grep -v grep >> "$SYSTEM_CHECK" || echo "No matching processes found" >> "$SYSTEM_CHECK"
+          echo "" >> "$SYSTEM_CHECK"
           
-          # Get process info
-          echo "Running Processes:" >> "$INFO_FILE"
-          ps aux | grep -i "vnc" | grep -v grep >> "$INFO_FILE" || echo "No VNC processes found" >> "$INFO_FILE"
-          echo "" >> "$INFO_FILE"
+          # Check network connections
+          echo "Network Connections:" >> "$SYSTEM_CHECK"
+          echo "-------------------" >> "$SYSTEM_CHECK"
+          lsof -i -P -n | grep -E "(sunshine|tailscale|47989)" >> "$SYSTEM_CHECK" || echo "No matching connections" >> "$SYSTEM_CHECK"
+          echo "" >> "$SYSTEM_CHECK"
           
-          # Get bundle info
-          echo "Bundle Information:" >> "$INFO_FILE"
-          if [ -d "/Applications/VNC Viewer.app" ]; then
-            defaults read "/Applications/VNC Viewer.app/Contents/Info" CFBundleIdentifier 2>/dev/null >> "$INFO_FILE" || echo "Could not read bundle info" >> "$INFO_FILE"
-          fi
-          echo "" >> "$INFO_FILE"
+          # Check Tailscale status
+          echo "Tailscale Final Status:" >> "$SYSTEM_CHECK"
+          echo "----------------------" >> "$SYSTEM_CHECK"
+          tailscale status >> "$SYSTEM_CHECK" 2>&1 || echo "Tailscale command failed" >> "$SYSTEM_CHECK"
+          echo "" >> "$SYSTEM_CHECK"
+          
+          # Count screenshots
+          TOTAL_SCREENSHOTS=$(find "$SCREENSHOT_DIR" -name "*.png" | wc -l)
+          echo "Total Screenshots Captured: $TOTAL_SCREENSHOTS" >> "$SYSTEM_CHECK"
+          echo "" >> "$SYSTEM_CHECK"
           
           # Disk usage
-          echo "Disk Usage:" >> "$INFO_FILE"
-          if [ -d "/Applications/VNC Viewer.app" ]; then
-            du -sh "/Applications/VNC Viewer.app" >> "$INFO_FILE"
-          fi
+          echo "Storage Usage:" >> "$SYSTEM_CHECK"
+          echo "-------------" >> "$SYSTEM_CHECK"
+          du -sh "$SCREENSHOT_DIR" >> "$SYSTEM_CHECK"
           
-          echo "✅ Application info captured"
+          echo "✅ System check complete"
 
-      - name: Final Screenshots and Cleanup
+      - name: Upload Monitoring Screenshots and Logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sunshine-monitoring-data
+          path: |
+            ${{ env.SCREENSHOT_DIR }}/0[2-9]_*.png
+            ${{ env.SCREENSHOT_DIR }}/[1-9][0-9]_*.png
+            ${{ env.SCREENSHOT_DIR }}/monitoring.log
+            ${{ env.SCREENSHOT_DIR }}/system_check.txt
+            ${{ env.SCREENSHOT_DIR }}/sunshine_start.log
+          retention-days: 7
+
+      - name: Cleanup
         run: |
-          echo "=== Final Screenshots and Cleanup ==="
+          echo "=== Cleaning Up ==="
           
-          # Take a few final screenshots
-          for i in {1..3}; do
-            final_file="$SCREENSHOT_DIR/14_final_${i}_$(date +%H%M%S).png"
-            screencapture -x "$final_file"
-            sleep 1
-          done
+          # Stop Sunshine
+          echo "Stopping Sunshine..."
+          pkill -f sunshine 2>/dev/null || true
           
-          # Quit VNC Viewer
-          echo "Quitting VNC Viewer..."
-          osascript -e 'tell application "VNC Viewer" to quit' 2>/dev/null || true
-          osascript -e 'tell application "VNC-Viewer" to quit' 2>/dev/null || true
+          # Disconnect Tailscale
+          echo "Disconnecting Tailscale..."
+          sudo tailscale down 2>/dev/null || true
           
-          # Force quit if needed
+          # Kill any remaining processes
           sleep 2
-          pkill -f "VNC Viewer" 2>/dev/null || true
-          pkill -f "VNC-Viewer" 2>/dev/null || true
+          pkill -9 -f sunshine 2>/dev/null || true
           
-          # List all screenshots
+          # List all artifacts
           echo ""
-          echo "=== All Screenshots Captured ==="
-          ls -lh "$SCREENSHOT_DIR/" | grep ".png"
-          echo ""
-          echo "Total screenshots: $(find "$SCREENSHOT_DIR" -name "*.png" | wc -l)"
-
-      - name: Upload Screenshots
-        uses: actions/upload-artifact@v4
-        with:
-          name: vnc-viewer-screenshots-macos-15.7.2
-          path: |
-            ${{ env.SCREENSHOT_DIR }}
-            downloads/VNC-Viewer.dmg
-          retention-days: 7
-
-      - name: Upload Summary
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: vnc-viewer-test-summary
-          path: |
-            ${{ env.SCREENSHOT_DIR }}/metadata.txt
-            ${{ env.SCREENSHOT_DIR }}/application_info.txt
-            ${{ env.SCREENSHOT_DIR }}/menu_test.log
-          retention-days: 7
+          echo "=== Final Artifact Summary ==="
+          echo "Screenshots directory: $SCREENSHOT_DIR"
+          echo "Total screenshots: $(find "$SCREENSHOT_DIR" -name "*.png" 2>/dev/null | wc -l)"
+          ls -lh "$SCREENSHOT_DIR"/
 
       - name: Final Report
         run: |
-          echo "=== VNC Viewer Test Complete ==="
+          echo "=== Sunshine + Tailscale Test Complete ==="
           echo ""
-          echo "📊 Summary:"
+          echo "📊 Test Summary:"
           echo "  macOS Version: $(sw_vers -productVersion)"
-          echo "  VNC Viewer: 7.15.1"
-          echo "  Screenshots taken: $(find "$SCREENSHOT_DIR" -name "*.png" 2>/dev/null | wc -l)"
-          echo "  Test duration: ~25 minutes"
+          echo "  Architecture: $(uname -m)"
+          echo "  Tailscale IP: ${{ env.TAILSCALE_IP }}"
+          echo "  Initial Screenshots: 5 (1 per second)"
+          echo "  Monitoring Screenshots: 20 (2 per minute for 10 minutes)"
+          echo "  Total Screenshots: $(find "$SCREENSHOT_DIR" -name "*.png" 2>/dev/null | wc -l)"
+          echo "  Test duration: ~15-20 minutes"
+          echo "  Sunshine running: $(ps -p ${{ env.SUNSHINE_PID }} >/dev/null 2>&1 && echo 'Yes' || echo 'No')"
           echo ""
           echo "✅ Workflow completed successfully!"
+          echo ""
+          echo "📁 Artifacts generated:"
+          echo "  1. sunshine-initial-screenshots - First 5 screenshots"
+          echo "  2. sunshine-monitoring-data - Remaining screenshots + logs"
