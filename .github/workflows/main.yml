@@ -1,398 +1,367 @@
-name: RustDesk with Screen Recording Permission
+name: macOS User Management and Settings Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  rustdesk-screenshots:
+  user-management-test:
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
-      - name: Create Hamiya User and Setup Environment
+      - name: Check macOS Version
         run: |
-          echo "=== Creating Hamiya User and Setup Environment ==="
-          
-          # Create the Hamiya user if not exists
-          if ! id Hamiya &>/dev/null; then
-            echo "Creating Hamiya user..."
-            sudo sysadminctl -addUser Hamiya -fullName "Hamiyas" -password Hamza@157
-            sudo dseditgroup -o edit -a Hamiya -t user admin
-            echo "✅ Hamiya user created and added to admin group"
-          else
-            echo "✅ Hamiya user already exists"
-          fi
-          
-          # Create and set permissions for Hamiya's home directory
-          echo "Setting up Hamiya's home directory..."
-          sudo mkdir -p /Users/Hamiya
-          sudo chown -R Hamiya:staff /Users/Hamiya
-          sudo chmod 755 /Users/Hamiya
-          
-          # Create .zshrc file for Hamiya using sudo
-          sudo -u Hamiya bash -c 'touch /Users/Hamiya/.zshrc'
-          sudo -u Hamiya bash -c 'echo "# Hamiya user environment" > /Users/Hamiya/.zshrc'
-          sudo -u Hamiya bash -c 'echo "export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:\$PATH\"" >> /Users/Hamiya/.zshrc'
-          sudo -u Hamiya bash -c 'echo "eval \"\$(/opt/homebrew/bin/brew shellenv)\"" >> /Users/Hamiya/.zshrc'
-          sudo -u Hamiya bash -c 'echo "export HOME=/Users/Hamiya" >> /Users/Hamiya/.zshrc'
-          
-          # Fix Homebrew permissions for Hamiya user
-          echo "Fixing Homebrew permissions..."
-          sudo chown -R Hamiya /opt/homebrew 2>/dev/null || true
-          
-          echo "✅ Hamiya environment set up"
+          echo "=== macOS Version ==="
+          sw_vers
+          echo "RUNNER_OS=$RUNNER_OS" >> $GITHUB_ENV
 
-      - name: Install Dependencies as Hamiya
+      - name: Create Screenshot Directory
         run: |
-          echo "=== Installing Dependencies as Hamiya ==="
-          
-          # Simple one-liner to install cliclick first
-          sudo -u Hamiya bash -c 'brew install cliclick'
-          echo "✅ cliclick installed"
-          
-          # Install RustDesk
-          sudo -u Hamiya bash -c 'brew install --cask rustdesk'
-          echo "✅ RustDesk installed via Homebrew"
-
-      - name: Get Exact Display Resolution
-        run: |
-          echo "=== Getting Exact Display Resolution ==="
-          
-          # Get resolution as current user
-          RESOLUTION=$(osascript -e 'tell application "Finder" to get bounds of window of desktop' 2>/dev/null | awk -F', ' '{print $3 "x" $4}')
-          
-          if [ -z "$RESOLUTION" ] || [ "$RESOLUTION" = "0x0" ] || [ "$RESOLUTION" = "x" ]; then
-            # Try system_profiler with better parsing
-            RESOLUTION=$(system_profiler SPDisplaysDataType 2>/dev/null | grep -A1 "Resolution:" | tail -1 | tr -d ' ' | sed 's/[^0-9x]//g')
-          fi
-          
-          if [ -z "$RESOLUTION" ] || [ "$RESOLUTION" = "0x0" ] || [ "$RESOLUTION" = "x" ]; then
-            # Fallback to known GitHub Actions runner resolution
-            RESOLUTION="1024x768"
-            echo "⚠️ Using default GitHub Actions resolution: $RESOLUTION"
-          else
-            echo "Detected resolution: $RESOLUTION"
-          fi
-          
-          # Clean up the resolution string
-          RESOLUTION=$(echo "$RESOLUTION" | tr -d ',' | tr -d ' ')
-          
-          # Parse width and height safely
-          WIDTH=$(echo "$RESOLUTION" | cut -d'x' -f1)
-          HEIGHT=$(echo "$RESOLUTION" | cut -d'x' -f2)
-          
-          # Verify we got valid numbers
-          if ! [[ "$WIDTH" =~ ^[0-9]+$ ]] || ! [[ "$HEIGHT" =~ ^[0-9]+$ ]]; then
-            echo "⚠️ Invalid resolution detected, using defaults"
-            WIDTH="1024"
-            HEIGHT="768"
-            RESOLUTION="${WIDTH}x${HEIGHT}"
-          fi
-          
-          echo "Width: $WIDTH px"
-          echo "Height: $HEIGHT px"
-          
-          echo "RESOLUTION=$RESOLUTION" >> $GITHUB_ENV
-          echo "SCREEN_WIDTH=$WIDTH" >> $GITHUB_ENV
-          echo "SCREEN_HEIGHT=$HEIGHT" >> $GITHUB_ENV
-          
-          # Create screenshots directory
+          echo "=== Creating Screenshot Directory ==="
           mkdir -p screenshots
           echo "SCREENSHOT_DIR=$(pwd)/screenshots" >> $GITHUB_ENV
 
-      - name: Start RustDesk as Hamiya User
+      - name: Initial Screenshot
         run: |
-          echo "=== Starting RustDesk as Hamiya User ==="
+          echo "=== Taking Initial Screenshot ==="
+          timestamp=$(date +%Y%m%d_%H%M%S)
+          screenshot_file="$SCREENSHOT_DIR/01_initial_desktop_$timestamp.png"
+          screencapture -x "$screenshot_file"
+          echo "✅ Initial screenshot saved: $screenshot_file"
+
+      - name: Enable Multiple Sessions
+        run: |
+          echo "=== Enabling Multiple Sessions ==="
           
-          # Launch RustDesk as Hamiya user
-          sudo -u Hamiya open -a /Applications/RustDesk.app
+          # Enable multiple sessions
+          echo "Enabling MultipleSessionEnabled..."
+          sudo defaults write /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled -bool true
           
-          echo "Waiting for RustDesk to start..."
-          echo "This may take 10-15 seconds..."
+          # Set multiple session name
+          echo "Setting MultipleSessionName..."
+          sudo defaults write /Library/Preferences/com.apple.loginwindow MultipleSessionName -string "FullName"
           
-          # Wait for RustDesk process
-          for i in {1..30}; do
-            if pgrep -f "RustDesk" > /dev/null; then
-              echo "✅ RustDesk process found (attempt $i)"
+          # Verify the settings
+          echo "Verifying settings:"
+          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled
+          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionName
+          
+          echo "✅ Multiple sessions enabled"
+
+      - name: Create Admin User
+        run: |
+          echo "=== Creating Admin User ==="
+          
+          # Create new user
+          echo "Creating user 'Hamiya'..."
+          sudo sysadminctl -addUser Hamiya -fullName "Hamiyas" -password "Hamza@157" || echo "User may already exist, continuing..."
+          
+          # Add user to admin group
+          echo "Adding 'Hamiya' to admin group..."
+          sudo dseditgroup -o edit -a Hamiya -t user admin || echo "User may already be admin, continuing..."
+          
+          # Verify admin membership
+          echo "Verifying admin membership:"
+          sudo dscl . read /Groups/admin GroupMembership || echo "Could not read admin group"
+          
+          echo "✅ User creation complete"
+
+      - name: Install cliclick for UI Automation
+        run: |
+          echo "=== Installing cliclick ==="
+          
+          # Install cliclick for precise clicking
+          if ! command -v cliclick &> /dev/null; then
+            echo "Installing cliclick..."
+            brew install cliclick
+          else
+            echo "✅ cliclick already installed"
+          fi
+          
+          # Verify installation
+          cliclick -v || echo "cliclick version check failed"
+
+      - name: Open System Settings
+        run: |
+          echo "=== Opening System Settings ==="
+          
+          # Close System Settings if already open
+          pkill -f "System Settings" 2>/dev/null || true
+          sleep 2
+          
+          # Open System Settings
+          echo "Opening System Settings..."
+          open -a "System Settings"
+          
+          # Wait for System Settings to open
+          echo "Waiting for System Settings to launch..."
+          for i in {1..10}; do
+            if pgrep -f "System Settings" > /dev/null; then
+              echo "✅ System Settings process found (attempt $i)"
               break
             fi
             sleep 1
           done
           
-          # Additional wait for permission dialog
-          sleep 15
-          
-          echo "RustDesk should be running now"
-          echo "Permission prompt should appear..."
-
-      - name: Take Initial Screenshot (Before Click)
-        run: |
-          echo "=== Taking Initial Screenshot (Before Permission Grant) ==="
-          
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          before_file="$SCREENSHOT_DIR/before_permission_$timestamp.png"
-          
-          # Take screenshot as current user
-          screencapture -x "$before_file"
-          
-          if [ -f "$before_file" ]; then
-            filesize=$(ls -lh "$before_file" | awk '{print $5}')
-            echo "✅ Initial screenshot saved: $before_file ($filesize)"
-          else
-            echo "⚠️ Failed to take initial screenshot"
-          fi
-
-      - name: Calculate Button Position
-        run: |
-          echo "=== Calculating Button Position ==="
-          
-          # GitHub Actions runner resolution (from your screenshots)
-          ORIGINAL_WIDTH=1024
-          ORIGINAL_HEIGHT=768
-          ORIGINAL_X=462
-          ORIGINAL_Y=374
-          
-          echo "Original resolution: ${ORIGINAL_WIDTH}x${ORIGINAL_HEIGHT}"
-          echo "Current resolution: ${SCREEN_WIDTH}x${SCREEN_HEIGHT}"
-          echo "Original button position: (${ORIGINAL_X}, ${ORIGINAL_Y})"
-          
-          # Calculate scaling factors using bc for precision
-          X_SCALE=$(echo "scale=2; $SCREEN_WIDTH / $ORIGINAL_WIDTH" | bc)
-          Y_SCALE=$(echo "scale=2; $SCREEN_HEIGHT / $ORIGINAL_HEIGHT" | bc)
-          
-          echo "Scaling factors: X=${X_SCALE}, Y=${Y_SCALE}"
-          
-          # Calculate new coordinates (round to nearest integer)
-          NEW_X=$(echo "$ORIGINAL_X * $X_SCALE" | bc | awk '{printf "%.0f", $1}')
-          NEW_Y=$(echo "$ORIGINAL_Y * $Y_SCALE" | bc | awk '{printf "%.0f", $1}')
-          
-          # Ensure coordinates are within screen bounds
-          if [ $NEW_X -lt 0 ]; then NEW_X=0; fi
-          if [ $NEW_X -gt $SCREEN_WIDTH ]; then NEW_X=$((SCREEN_WIDTH - 10)); fi
-          if [ $NEW_Y -lt 0 ]; then NEW_Y=0; fi
-          if [ $NEW_Y -gt $SCREEN_HEIGHT ]; then NEW_Y=$((SCREEN_HEIGHT - 10)); fi
-          
-          echo "Calculated button position: (${NEW_X}, ${NEW_Y})"
-          
-          echo "BUTTON_X=$NEW_X" >> $GITHUB_ENV
-          echo "BUTTON_Y=$NEW_Y" >> $GITHUB_ENV
-
-      - name: Click Allow Button
-        run: |
-          echo "=== Clicking Allow Button ==="
-          echo "Clicking at coordinates: ($BUTTON_X, $BUTTON_Y)"
-          
-          # Simple click using cliclick as Hamiya
-          sudo -u Hamiya bash -c 'cliclick c:'"$BUTTON_X"','"$BUTTON_Y"
-          echo "✅ Click performed with cliclick"
-          
-          # Wait for dialog to close
+          # Give UI time to load
           sleep 3
           
-          # AppleScript alternative
-          sudo -u Hamiya bash -c '/usr/bin/osascript <<EOF
-          tell application "System Events"
-            delay 0.5
-            set xPos to '"$BUTTON_X"'
-            set yPos to '"$BUTTON_Y"'
-            click at {xPos, yPos}
-          end tell
-          EOF'
-          
-          # Grant permissions via tccutil
-          echo "Attempting to grant screen recording permission via TCC..."
-          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES('kTCCServiceScreenRecording','com.carriez.rustdesk',0,1,1,NULL,NULL,NULL,'UNUSED',NULL,0,UNIXEPOCH());" 2>/dev/null || echo "Note: TCC database modification attempted"
-          
-          echo "✅ All click methods attempted"
+          # Take screenshot after opening
+          screenshot_file="$SCREENSHOT_DIR/02_system_settings_open_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "✅ System Settings opened, screenshot saved"
 
-      - name: Take Verification Screenshots (2 Only)
+      - name: Click at 507,363
         run: |
-          echo "=== Taking Verification Screenshots (2 Only) ==="
+          echo "=== Clicking at coordinates (507, 363) ==="
           
-          # Wait a bit for RustDesk to initialize
-          sleep 5
+          # Take screenshot before click
+          screenshot_file="$SCREENSHOT_DIR/03_before_click_507_363_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot before click saved"
           
-          # Take only 2 verification screenshots as requested
-          for i in {1..2}; do
-            echo ""
-            echo "📸 Taking verification screenshot $i/2..."
-            
-            timestamp=$(date +%Y%m%d_%H%M%S)
-            filepath="$SCREENSHOT_DIR/verification_${i}_${timestamp}.png"
-            
-            screencapture -x "$filepath"
-            
-            if [ -f "$filepath" ]; then
-              filesize=$(ls -lh "$filepath" | awk '{print $5}')
-              echo "✅ Saved: $(basename $filepath) ($filesize)"
-            else
-              echo "⚠️ Failed to take screenshot $i"
-            fi
-            
-            if [ $i -lt 2 ]; then
-              echo "   Waiting 2 seconds..."
-              sleep 2
-            fi
-          done
+          # Click at coordinates (507, 363)
+          echo "Clicking at coordinates (507, 363)..."
+          cliclick c:507,363
           
-          # List all screenshots
-          echo ""
-          echo "=== All Screenshots ==="
-          ls -la "$SCREENSHOT_DIR/" 2>/dev/null | head -15
-
-      - name: Additional UI Clicks
-        run: |
-          echo "=== Performing Additional UI Clicks ==="
+          echo "✅ Click performed at (507, 363)"
           
-          # Original coordinates at 1024x768: 
-          # 1: (210, 563), 2: (542, 293), 3: (820, 316), 4: (828, 313), 5: (543, 478)
-          
-          ORIGINAL_WIDTH=1024
-          ORIGINAL_HEIGHT=768
-          
-          # Define all click coordinates
-          declare -a CLICK_COORDS=(
-            "210 563"
-            "542 293" 
-            "820 316"
-            "828 313"
-            "543 478"
-          )
-          
-          # Calculate scaling factors
-          X_SCALE=$(echo "scale=2; $SCREEN_WIDTH / $ORIGINAL_WIDTH" | bc)
-          Y_SCALE=$(echo "scale=2; $SCREEN_HEIGHT / $ORIGINAL_HEIGHT" | bc)
-          
-          echo "Original resolution: ${ORIGINAL_WIDTH}x${ORIGINAL_HEIGHT}"
-          echo "Current resolution: ${SCREEN_WIDTH}x${SCREEN_HEIGHT}"
-          echo "Scaling factors: X=${X_SCALE}, Y=${Y_SCALE}"
-          echo ""
-          
-          echo "=== Performing 5 Additional Clicks ==="
-          
-          # Perform all 5 clicks
-          for i in "${!CLICK_COORDS[@]}"; do
-            ORIG_X=$(echo "${CLICK_COORDS[$i]}" | awk '{print $1}')
-            ORIG_Y=$(echo "${CLICK_COORDS[$i]}" | awk '{print $2}')
-            
-            SCALED_X=$(echo "$ORIG_X * $X_SCALE" | bc | awk '{printf "%.0f", $1}')
-            SCALED_Y=$(echo "$ORIG_Y * $Y_SCALE" | bc | awk '{printf "%.0f", $1}')
-            
-            echo ""
-            echo "🔘 Performing click $((i+1)) at ($SCALED_X, $SCALED_Y)..."
-            
-            # Click as Hamiya user
-            sudo -u Hamiya bash -c 'cliclick c:'"$SCALED_X"','"$SCALED_Y"
-            
-            echo "✅ Click $((i+1)) completed"
-            
-            if [ $i -lt $(( ${#CLICK_COORDS[@]} - 1 )) ]; then
-              echo "⏳ Waiting 2 seconds..."
-              sleep 2
-            fi
-          done
-          
-          # Wait 2 seconds after 5th click
-          echo "⏳ Waiting 2 seconds after 5th click..."
+          # Wait for action to complete
           sleep 2
           
-          # Take screenshot after all clicks
-          echo ""
-          echo "📸 Taking screenshot after all 5 clicks..."
-          addon_file="$SCREENSHOT_DIR/addon_after_5clicks_$(date +%Y%m%d_%H%M%S).png"
-          screencapture -x "$addon_file"
-          
-          if [ -f "$addon_file" ]; then
-            filesize=$(ls -lh "$addon_file" | awk '{print $5}')
-            echo "✅ Addon screenshot saved: $(basename $addon_file) ($filesize)"
-          else
-            echo "⚠️ Failed to take addon screenshot"
-          fi
-          
-          echo "=== All 5 Additional UI Clicks Completed ==="
+          # Take screenshot after click
+          screenshot_file="$SCREENSHOT_DIR/04_after_click_507_363_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot after click saved"
 
-      - name: Upload All Screenshots
-        uses: actions/upload-artifact@v4
-        with:
-          name: rustdesk-permission-screenshots
-          path: ${{ env.SCREENSHOT_DIR }}
-          retention-days: 1
-
-      - name: Keep System Running for 20 Minutes
+      - name: Search for Fast User Switching
         run: |
-          echo "=== Keeping System Running for 20 Minutes ==="
-          echo "Start time: $(date)"
-          echo "End time: $(date -v+20M)"
-          echo ""
-          echo "RustDesk should be working with screen recording permission"
-          echo "Running as Hamiya user"
-          echo ""
+          echo "=== Searching for 'Fast User Switching' ==="
           
-          # Create status file
-          STATUS_FILE="$SCREENSHOT_DIR/rustdesk_status.txt"
-          echo "RustDesk 20-Minute Monitoring Log" > "$STATUS_FILE"
-          echo "=================================" >> "$STATUS_FILE"
-          echo "User: Hamiya" >> "$STATUS_FILE"
-          echo "Resolution: $RESOLUTION" >> "$STATUS_FILE"
-          echo "Allow button clicked at: ($BUTTON_X, $BUTTON_Y)" >> "$STATUS_FILE"
-          echo "Start time: $(date)" >> "$STATUS_FILE"
-          echo "" >> "$STATUS_FILE"
+          # Wait 5 seconds as requested
+          echo "Waiting 5 seconds..."
+          sleep 5
           
-          # Run for 20 minutes
-          for minute in {1..20}; do
-            current_time=$(date '+%H:%M:%S')
-            echo "[$current_time] Minute $minute/20"
-            echo "[$current_time] Minute $minute/20" >> "$STATUS_FILE"
+          # Take screenshot before search
+          screenshot_file="$SCREENSHOT_DIR/05_before_search_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot before search saved"
+          
+          # Activate System Settings window
+          echo "Activating System Settings window..."
+          osascript -e 'tell application "System Settings" to activate' 2>/dev/null || true
+          sleep 1
+          
+          # Use keyboard shortcut Cmd+F to open search
+          echo "Opening search with Cmd+F..."
+          osascript -e 'tell application "System Events" to keystroke "f" using command down'
+          sleep 1
+          
+          # Type "Fast User Switching" into search
+          echo "Typing 'Fast User Switching'..."
+          osascript -e 'tell application "System Events" to keystroke "Fast User Switching"'
+          sleep 2
+          
+          # Take screenshot after typing search
+          screenshot_file="$SCREENSHOT_DIR/06_search_typed_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot after search typed saved"
+          
+          # Press Enter to search
+          echo "Pressing Enter to search..."
+          osascript -e 'tell application "System Events" to key code 36'  # Enter key
+          sleep 3
+          
+          # Take screenshot of search results
+          screenshot_file="$SCREENSHOT_DIR/07_search_results_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot of search results saved"
+
+      - name: Click Sequence After Search
+        run: |
+          echo "=== Click Sequence After Search ==="
+          
+          # Click at 256,242
+          echo "Clicking at coordinates (256, 242)..."
+          cliclick c:256,242
+          sleep 1
+          screenshot_file="$SCREENSHOT_DIR/08_after_256_242_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot after click at (256, 242)"
+          
+          # Click at 827,202
+          echo "Clicking at coordinates (827, 202)..."
+          cliclick c:827,202
+          sleep 1
+          screenshot_file="$SCREENSHOT_DIR/09_after_827_202_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot after click at (827, 202)"
+          
+          # Click at 791,221
+          echo "Clicking at coordinates (791, 221)..."
+          cliclick c:791,221
+          sleep 1
+          screenshot_file="$SCREENSHOT_DIR/10_after_791_221_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot after click at (791, 221)"
+
+      - name: Top Bar Click Sequence
+        run: |
+          echo "=== Top Bar Click Sequence ==="
+          
+          # Click at 785,7 (instead of 858,11)
+          echo "Clicking at coordinates (785, 7)..."
+          cliclick c:785,7
+          sleep 1
+          screenshot_file="$SCREENSHOT_DIR/11_after_785_7_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot after click at (785, 7)"
+          
+          # Click at 710,73
+          echo "Clicking at coordinates (710, 73)..."
+          cliclick c:710,73
+          sleep 1
+          screenshot_file="$SCREENSHOT_DIR/12_after_710_73_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Screenshot after click at (710, 73)"
+          who
+
+      - name: Continuous Screenshot Capture
+        run: |
+          echo "=== Continuous Screenshot Capture (15 seconds) ==="
+          echo "Taking 1 screenshot every second for 15 seconds..."
+          
+          for i in {1..15}; do
+            screenshot_file="$SCREENSHOT_DIR/13_continuous_${i}_$(date +%H%M%S).png"
+            screencapture -x "$screenshot_file"
+            echo "📸 Screenshot $i/15: $screenshot_file"
             
-            # Check RustDesk status
-            if pgrep -f "RustDesk" > /dev/null; then
-              echo "  ✅ RustDesk: Running"
-              echo "  RustDesk: Running" >> "$STATUS_FILE"
-              
-              # Take screenshot every 4 minutes
-              if [ $((minute % 4)) -eq 0 ]; then
-                runtime_file="$SCREENSHOT_DIR/runtime_${minute}min_$(date +%H%M%S).png"
-                if screencapture -x "$runtime_file" 2>/dev/null; then
-                  echo "  📸 Runtime screenshot taken"
-                  echo "  Screenshot at minute $minute" >> "$STATUS_FILE"
-                fi
-              fi
-            else
-              echo "  ⚠️ RustDesk: Not running"
-              echo "  RustDesk: Not running at minute $minute" >> "$STATUS_FILE"
+            # Wait 1 second between screenshots
+            if [ $i -lt 15 ]; then
+              sleep 1
             fi
-            
-            echo "  Waiting 1 minute..."
-            echo "" >> "$STATUS_FILE"
-            sleep 60
           done
           
-          echo ""
-          echo "✅ 20-minute runtime completed at $(date)"
-          echo "End time: $(date)" >> "$STATUS_FILE"
+          echo "✅ Continuous screenshot capture complete"
 
-      - name: Upload Final Status
+      - name: Capture System Information
+        run: |
+          echo "=== Capturing System Information ==="
+          
+          INFO_FILE="$SCREENSHOT_DIR/system_info.txt"
+          
+          echo "macOS User Management Test Report" > "$INFO_FILE"
+          echo "=================================" >> "$INFO_FILE"
+          echo "Test Date: $(date)" >> "$INFO_FILE"
+          echo "macOS Version: $(sw_vers -productVersion)" >> "$INFO_FILE"
+          echo "" >> "$INFO_FILE"
+          
+          echo "System Configuration:" >> "$INFO_FILE"
+          echo "-------------------" >> "$INFO_FILE"
+          
+          # Check multiple session settings
+          echo "Multiple Session Settings:" >> "$INFO_FILE"
+          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionEnabled 2>/dev/null >> "$INFO_FILE" || echo "Not set" >> "$INFO_FILE"
+          sudo defaults read /Library/Preferences/com.apple.loginwindow MultipleSessionName 2>/dev/null >> "$INFO_FILE" || echo "Not set" >> "$INFO_FILE"
+          echo "" >> "$INFO_FILE"
+          
+          # Check created user
+          echo "User Information:" >> "$INFO_FILE"
+          id Hamiya 2>/dev/null >> "$INFO_FILE" || echo "User not found" >> "$INFO_FILE"
+          echo "" >> "$INFO_FILE"
+          
+          # Check admin group membership
+          echo "Admin Group Members:" >> "$INFO_FILE"
+          dscl . read /Groups/admin GroupMembership 2>/dev/null >> "$INFO_FILE" || echo "Could not read admin group" >> "$INFO_FILE"
+          echo "" >> "$INFO_FILE"
+          
+          # Get screen resolution
+          echo "Screen Resolution:" >> "$INFO_FILE"
+          system_profiler SPDisplaysDataType 2>/dev/null | grep -A1 "Resolution:" | tail -1 >> "$INFO_FILE" || echo "Unknown" >> "$INFO_FILE"
+          echo "" >> "$INFO_FILE"
+          
+          echo "Test Actions Performed:" >> "$INFO_FILE"
+          echo "----------------------" >> "$INFO_FILE"
+          echo "1. Enabled MultipleSessionEnabled and set MultipleSessionName" >> "$INFO_FILE"
+          echo "2. Created user 'Hamiya' with admin privileges" >> "$INFO_FILE"
+          echo "3. Opened System Settings" >> "$INFO_FILE"
+          echo "4. Clicked at coordinates (507, 363)" >> "$INFO_FILE"
+          echo "5. Searched for 'Fast User Switching'" >> "$INFO_FILE"
+          echo "6. Click sequence after search:" >> "$INFO_FILE"
+          echo "   - Clicked at (256, 242)" >> "$INFO_FILE"
+          echo "   - Clicked at (827, 202)" >> "$INFO_FILE"
+          echo "   - Clicked at (791, 221)" >> "$INFO_FILE"
+          echo "7. Top bar click sequence:" >> "$INFO_FILE"
+          echo "   - Clicked at (785, 7)" >> "$INFO_FILE"
+          echo "   - Clicked at (710, 73)" >> "$INFO_FILE"
+          echo "8. Continuous screenshot capture: 15 screenshots (1 per second)" >> "$INFO_FILE"
+          echo "" >> "$INFO_FILE"
+          
+          echo "Screenshots Captured:" >> "$INFO_FILE"
+          echo "-------------------" >> "$INFO_FILE"
+          find "$SCREENSHOT_DIR" -name "*.png" -exec basename {} \; | sort >> "$INFO_FILE"
+          
+          echo "Total screenshots: $(find "$SCREENSHOT_DIR" -name "*.png" | wc -l)" >> "$INFO_FILE"
+          
+          echo "✅ System information saved"
+
+      - name: Cleanup
+        run: |
+          echo "=== Cleaning Up ==="
+          
+          # Close System Settings
+          echo "Closing System Settings..."
+          pkill -f "System Settings" 2>/dev/null || true
+          
+          # Take one final desktop screenshot
+          screenshot_file="$SCREENSHOT_DIR/final_desktop_$(date +%H%M%S).png"
+          screencapture -x "$screenshot_file"
+          echo "📸 Final desktop screenshot saved"
+
+      - name: Upload Screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-user-management-screenshots
+          path: |
+            ${{ env.SCREENSHOT_DIR }}
+          retention-days: 7
+
+      - name: Upload Summary
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: rustdesk-final-status
+          name: macos-user-management-summary
           path: |
-            ${{ env.SCREENSHOT_DIR }}/rustdesk_status.txt
-            ${{ env.SCREENSHOT_DIR }}
-          retention-days: 1
+            ${{ env.SCREENSHOT_DIR }}/system_info.txt
+          retention-days: 7
 
-      - name: Final Cleanup
-        if: always()
+      - name: Final Report
         run: |
-          echo "=== Final Cleanup ==="
-          
-          # Final screenshot
-          final_file="$SCREENSHOT_DIR/final_complete_$(date +%H%M%S).png"
-          screencapture -x "$final_file" 2>/dev/null && echo "✅ Final screenshot taken" || echo "⚠️ Could not take final screenshot"
-          
-          # Stop RustDesk
-          pkill -f "RustDesk" 2>/dev/null || true
-          
-          echo "✅ Cleanup complete"
-          echo "Total workflow time: ~25 minutes"
-          echo "Total screenshots captured: $(find "$SCREENSHOT_DIR" -name "*.png" 2>/dev/null | wc -l)"
+          echo "=== macOS User Management Test Complete ==="
+          echo ""
+          who
+          who
+          who
+          echo "📊 Summary:"
+          echo "  ✅ macOS Version: $(sw_vers -productVersion)"
+          echo "  ✅ Multiple sessions enabled"
+          echo "  ✅ User 'Hamiya' created with admin privileges"
+          echo "  ✅ System Settings opened and tested"
+          SCREENSHOT_COUNT=$(find "$SCREENSHOT_DIR" -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
+          echo "  ✅ $SCREENSHOT_COUNT screenshots captured"
+          echo ""
+          echo "🎯 Test Tasks Completed:"
+          echo "  1. Enabled multiple sessions"
+          echo "  2. Created admin user 'Hamiya'"
+          echo "  3. Opened System Settings"
+          echo "  4. Clicked at (507, 363)"
+          echo "  5. Searched for 'Fast User Switching'"
+          echo "  6. Click sequence: (256, 242) → (827, 202) → (791, 221)"
+          echo "  7. Top bar clicks: (785, 7) → (710, 73)"
+          echo "  8. Continuous screenshots: 15 screenshots (1 per second)"
+          echo ""
+          echo "📁 Artifacts:"
+          echo "  • Screenshots uploaded as 'macos-user-management-screenshots'"
+          echo "  • Test summary uploaded as 'macos-user-management-summary'"
+          echo ""
+          echo "✅ All tasks completed successfully!"
