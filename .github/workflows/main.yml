@@ -342,6 +342,7 @@ jobs:
           who
           who
           who
+          ps aux | grep loginwindow
           echo "📊 Summary:"
           echo "  ✅ macOS Version: $(sw_vers -productVersion)"
           echo "  ✅ Multiple sessions enabled"
