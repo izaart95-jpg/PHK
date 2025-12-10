@@ -1,51 +1,35 @@
-name: Parsec Auto Login
+name: Parsec AutoHotkey Automation
 
 on:
   workflow_dispatch:
 
 jobs:
-  parsec-autologin:
+  parsec-ahk-automation:
     runs-on: windows-latest
-    timeout-minutes: 1440  # 24 hours (6 hours active + buffer)
+    timeout-minutes: 360  # 6 hours
 
     steps:
       - name: Create working directory
         run: |
-          $workDir = "$env:GITHUB_WORKSPACE\parsec-autologin"
+          $workDir = "$env:GITHUB_WORKSPACE\parsec-automation"
           New-Item -ItemType Directory -Path $workDir -Force
           Set-Location $workDir
           echo "WORK_DIR=$workDir" >> $env:GITHUB_ENV
 
       - name: Download and install AutoHotkey v2
         run: |
-          Write-Host "Downloading AutoHotkey v2..."
           $ahkUrl = "https://www.autohotkey.com/download/ahk-v2.exe"
-          $ahkInstaller = "$env:WORK_DIR\ahk-v2.exe"
-          Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkInstaller
+          $ahkPath = "$env:WORK_DIR\ahk-v2.exe"
+          Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkPath
           
-          Write-Host "Installing AutoHotkey v2 silently..."
-          Start-Process -FilePath $ahkInstaller -ArgumentList "/silent" -Wait
-          
-          # Verify installation
-          $ahkPath = "C:\Program Files\AutoHotkey\UX\AutoHotkeyUX.exe"
-          if (Test-Path $ahkPath) {
-              echo "AHK_PATH=$ahkPath" >> $env:GITHUB_ENV
-              Write-Host "AutoHotkey installed successfully at: $ahkPath"
-          } else {
-              # Try alternative path
-              $ahkPath = "C:\Program Files\AutoHotkey\v2\AutoHotkeyUX.exe"
-              if (Test-Path $ahkPath) {
-                  echo "AHK_PATH=$ahkPath" >> $env:GITHUB_ENV
-                  Write-Host "AutoHotkey found at alternative path: $ahkPath"
-              } else {
-                  Write-Host "ERROR: AutoHotkey not found at expected locations"
-                  Get-ChildItem "C:\Program Files\AutoHotkey" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
-              }
-          }
+          # Install AutoHotkey silently
+          Start-Process -FilePath $ahkPath -ArgumentList "/silent" -Wait
+          echo "AutoHotkey installed"
 
       - name: Create AutoHotkey script
         run: |
-          $scriptContent = @'
+          $scriptPath = "$env:WORK_DIR\script.ahk"
+          @"
 Sleep 3000
 Send "ffbewafa709@gmail.com"
 Sleep 1000
@@ -56,139 +40,67 @@ Sleep 1000
 Send "{Enter}"
 Sleep 30000
 Send "{Enter}"
-'@
+"@ | Out-File -FilePath $scriptPath -Encoding utf8
           
-          $scriptPath = "$env:WORK_DIR\script.ahk"
-          $scriptContent | Out-File -FilePath $scriptPath -Encoding UTF8
-          echo "SCRIPT_PATH=$scriptPath" >> $env:GITHUB_ENV
-          
-          Write-Host "Script created at: $scriptPath"
-          Write-Host "Script content:"
-          Get-Content $scriptPath
+          echo "AHK_SCRIPT_PATH=$scriptPath" >> $env:GITHUB_ENV
+          Write-Host "Created AHK script at: $scriptPath"
 
       - name: Download and install Parsec
         run: |
-          Write-Host "Downloading Parsec..."
           $parsecUrl = "https://builds.parsec.app/package/parsec-windows.exe"
-          $parsecInstaller = "$env:WORK_DIR\parsec-windows.exe"
-          Invoke-WebRequest -Uri $parsecUrl -OutFile $parsecInstaller
+          $parsecPath = "$env:WORK_DIR\parsec-windows.exe"
+          Invoke-WebRequest -Uri $parsecUrl -OutFile $parsecPath
           
-          Write-Host "Installing Parsec silently..."
-          Start-Process -FilePath $parsecInstaller -ArgumentList "/S" -Wait
-          
-          Write-Host "Waiting 20 seconds for installation to complete..."
+          # Install Parsec silently
+          Start-Process -FilePath $parsecPath -ArgumentList "/S" -Wait
+          echo "Parsec installed"
           Start-Sleep -Seconds 20
-          
-          # Verify Parsec installation
-          $parsecPaths = @(
-              "C:\Program Files\Parsec\parsecd.exe",
-              "C:\Program Files (x86)\Parsec\parsecd.exe",
-              "$env:LOCALAPPDATA\Parsec\parsecd.exe"
-          )
-          
-          $parsecFound = $false
-          foreach ($path in $parsecPaths) {
-              if (Test-Path $path) {
-                  Write-Host "Parsec found at: $path"
-                  $parsecFound = $true
-                  break
-              }
-          }
-          
-          if (-not $parsecFound) {
-              Write-Host "WARNING: Parsec executable not found at common locations"
-              Get-ChildItem "C:\Program Files\Parsec" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
-              Get-ChildItem "C:\Program Files (x86)\Parsec" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
-          }
 
       - name: Run AutoHotkey script
         run: |
-          Write-Host "Running AutoHotkey script..."
+          # Find AutoHotkey executable
+          $ahkExe = "C:\Program Files\AutoHotkey\UX\AutoHotkeyUX.exe"
           
-          # Check if AutoHotkey is installed
-          if (-not (Test-Path $env:AHK_PATH)) {
-              Write-Host "ERROR: AutoHotkey not found at $env:AHK_PATH"
-              Write-Host "Trying to find AutoHotkey..."
-              Get-ChildItem "C:\Program Files\AutoHotkey" -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object FullName
-              exit 1
+          if (Test-Path $ahkExe) {
+              Write-Host "Found AutoHotkey at: $ahkExe"
+              Write-Host "Running script: $env:AHK_SCRIPT_PATH"
+              
+              # Run the AHK script
+              Start-Process -FilePath $ahkExe -ArgumentList "`"$env:AHK_SCRIPT_PATH`""
+          } else {
+              Write-Host "AutoHotkey not found in Program Files. Searching..."
+              # Try alternative locations
+              $ahkExeAlt = Get-ChildItem "C:\" -Recurse -Filter "AutoHotkeyUX.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($ahkExeAlt) {
+                  Start-Process -FilePath $ahkExeAlt.FullName -ArgumentList "`"$env:AHK_SCRIPT_PATH`""
+              } else {
+                  Write-Host "ERROR: AutoHotkey not found!"
+              }
           }
           
-          # Check if script exists
-          if (-not (Test-Path $env:SCRIPT_PATH)) {
-              Write-Host "ERROR: Script not found at $env:SCRIPT_PATH"
-              exit 1
-          }
-          
-          Write-Host "Starting AutoHotkey with script: $env:SCRIPT_PATH"
-          Write-Host "Using AutoHotkey executable: $env:AHK_PATH"
-          
-          # Run AutoHotkey script
-          Start-Process -FilePath $env:AHK_PATH -ArgumentList "`"$env:SCRIPT_PATH`"" -WindowStyle Hidden
-          
-          Write-Host "AutoHotkey script started. Waiting for script execution..."
-          Start-Sleep -Seconds 40  # Wait for script to complete (3+1+1+1+30+Enter = ~36 seconds)
+          Write-Host "AutoHotkey script started"
+          Start-Sleep -Seconds 5
 
       - name: Keep workflow running for 6 hours
         run: |
-          Write-Host "=== Parsec Auto Login Workflow ==="
-          Write-Host "Parsec should now be running with auto-login"
-          Write-Host "AutoHotkey script has been executed"
+          Write-Host "=== Parsec AutoHotkey Automation ==="
+          Write-Host "AutoHotkey script is running"
+          Write-Host "Parsec should be installed and configured"
           Write-Host "Workflow will run for 6 hours or until manually cancelled"
-          Write-Host "===================================="
+          Write-Host "====================================="
           
           # Keep the workflow alive for 6 hours
           $startTime = Get-Date
-          $maxDurationHours = 6
-          
-          while ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalHours -lt $maxDurationHours) {
-              $elapsed = (New-TimeSpan -Start $startTime -End (Get-Date)).TotalMinutes
-              Write-Host "[$(Get-Date)] Workflow active - Elapsed: $elapsed minutes / $($maxDurationHours*60) minutes"
-              
-              # Check if Parsec processes are running
-              $parsecProcesses = Get-Process -Name "parsecd", "Parsec" -ErrorAction SilentlyContinue
-              if ($parsecProcesses) {
-                  Write-Host "  Parsec processes running: $($parsecProcesses.Count)"
-              } else {
-                  Write-Host "  WARNING: No Parsec processes detected"
-              }
-              
-              # Check if AutoHotkey is running
-              $ahkProcesses = Get-Process -Name "AutoHotkey*" -ErrorAction SilentlyContinue
-              if ($ahkProcesses) {
-                  Write-Host "  AutoHotkey processes running: $($ahkProcesses.Count)"
-              }
-              
-              Start-Sleep -Seconds 300  # Sleep for 5 minutes
+          while ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalHours -lt 6) {
+              Write-Host "[$(Get-Date)] Still running... (Ctrl+C in workflow to terminate)"
+              Start-Sleep -Seconds 300  # Check every 5 minutes
           }
           
           Write-Host "6-hour limit reached, workflow completed"
 
-      - name: Optional: Take screenshot proof
+      - name: List files for debugging
         if: always()
         run: |
-          Write-Host "Taking final screenshot..."
-          
-          # Using .NET method for screenshot
-          Add-Type -AssemblyName System.Windows.Forms
-          Add-Type -AssemblyName System.Drawing
-          
-          $screenBounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bitmap = New-Object System.Drawing.Bitmap $screenBounds.Width, $screenBounds.Height
-          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-          $graphics.CopyFromScreen($screenBounds.Location, [System.Drawing.Point]::Empty, $screenBounds.Size)
-          
-          $screenshotPath = "$env:WORK_DIR\final_screenshot.png"
-          $bitmap.Save($screenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
-          $graphics.Dispose()
-          $bitmap.Dispose()
-          
-          Write-Host "Screenshot saved to: $screenshotPath"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: parsec-autologin-artifacts
-          path: |
-            ${{ env.WORK_DIR }}/
-          retention-days: 1
+          Write-Host "Current directory: $(Get-Location)"
+          Write-Host "Contents of work directory:"
+          Get-ChildItem -Path $env:WORK_DIR -Recurse -ErrorAction SilentlyContinue | Format-Table Name, Length, LastWriteTime
