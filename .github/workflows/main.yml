@@ -1,4 +1,4 @@
-name: Parsec Auto Lgin
+name: Parse
 
 on:
   workflow_dispatch:
