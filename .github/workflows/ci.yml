@@ -63,6 +63,9 @@ jobs:
           Send "{Enter}"
           Sleep 35000
           Send "{Tab}"
+          Sleep 1000
+          Send "{Enter}"
+          Send "{Tab}"
           Send "{Enter}"
           '@
           
