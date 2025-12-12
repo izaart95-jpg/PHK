@@ -32,14 +32,30 @@ jobs:
           echo "NIRCMD_PATH=$nircmdPath" >> $env:GITHUB_ENV
           Write-Host "NirCmd installed at: $nircmdPath"
 
-      - name: Download and install AutoHotkey v2
+      - name: Download and install AutoHotkey v2 (Official)
         shell: powershell
         run: |
-          $ahkUrl = "https://download1532.mediafire.com/b2tq21p9107gms-k4vnD6bn3k7M902vy5S_DuEF3GtbJBBoEXwoPU3aPS0ss4AsReX7Ia-9jtHqDKhVK2iZs6TzEwDC-4sR4zbfe7FT0eqIPCav_T1Hkdj0Bmli1vVzU2cFm4IkTcmaepV04qN5LFK6H2w9kQkGzgXfCDeo-q9tGqmc/tob6736a61vcdph/AutoHotkey_2.0.19_setup.exe"
-          $ahkPath = "$env:WORK_DIR\ahk-v2.exe"
-          Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkPath
+          # Download from official AutoHotkey GitHub releases
+          $ahkUrl = "https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.19/AutoHotkey_2.0.19_setup.exe"
+          $ahkPath = "$env:WORK_DIR\AutoHotkey_Setup.exe"
+          
+          Write-Host "Downloading AutoHotkey from official source..."
+          Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkPath -UseBasicParsing
+          
+          # Verify file is valid
+          $fileInfo = Get-Item $ahkPath
+          Write-Host "Downloaded file size: $($fileInfo.Length) bytes"
+          
+          if ($fileInfo.Length -lt 1000000) {
+              Write-Host "ERROR: File too small, download may have failed"
+              exit 1
+          }
+          
+          # Install silently
+          Write-Host "Installing AutoHotkey..."
           Start-Process -FilePath $ahkPath -ArgumentList "/silent" -Wait
-          echo "AutoHotkey installed"
+          
+          Write-Host "AutoHotkey installed successfully"
 
       - name: Download AutoHotkey script
         shell: powershell
@@ -49,6 +65,10 @@ jobs:
           Invoke-WebRequest -Uri $scriptUrl -OutFile $scriptPath
           echo "AHK_SCRIPT_PATH=$scriptPath" >> $env:GITHUB_ENV
           Write-Host "Downloaded AHK script to: $scriptPath"
+          
+          # Show script content for debugging
+          Write-Host "Script content:"
+          Get-Content $scriptPath -ErrorAction SilentlyContinue | Select-Object -First 20
 
       - name: Download and install Parsec
         shell: powershell
@@ -65,30 +85,35 @@ jobs:
         run: |
           $ahkUX = "C:\Program Files\AutoHotkey\UX\AutoHotkeyUX.exe"
           $ahkV2 = "C:\Program Files\AutoHotkey\v2\AutoHotkey.exe"
+          $ahk32 = "C:\Program Files\AutoHotkey\v2\AutoHotkey32.exe"
+          $ahk64 = "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
           
           # Start Parsec
           Start-Process "parsec:" -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 5
           
-          # Start AutoHotkey script
-          if (Test-Path $ahkUX) {
-              Start-Process -FilePath $ahkUX -ArgumentList "`"$env:AHK_SCRIPT_PATH`""
-              Write-Host "Started AHK using UX launcher"
-          }
-          elseif (Test-Path $ahkV2) {
-              Start-Process -FilePath $ahkV2 -ArgumentList "`"$env:AHK_SCRIPT_PATH`""
-              Write-Host "Started AHK using v2 directly"
+          # Find and start AutoHotkey
+          $ahkExe = $null
+          if (Test-Path $ahkUX) { $ahkExe = $ahkUX }
+          elseif (Test-Path $ahkV2) { $ahkExe = $ahkV2 }
+          elseif (Test-Path $ahk64) { $ahkExe = $ahk64 }
+          elseif (Test-Path $ahk32) { $ahkExe = $ahk32 }
+          
+          if ($ahkExe) {
+              Write-Host "Using AutoHotkey: $ahkExe"
+              Start-Process -FilePath $ahkExe -ArgumentList "`"$env:AHK_SCRIPT_PATH`""
+              Write-Host "AHK script started"
           }
           else {
-              Write-Host "AutoHotkey NOT FOUND!"
+              Write-Host "AutoHotkey NOT FOUND! Listing Program Files:"
+              Get-ChildItem "C:\Program Files\AutoHotkey" -Recurse -ErrorAction SilentlyContinue
           }
           
-          Write-Host "=== AHK STARTED - NOW TAKING SCREENSHOTS FOR 1 MINUTE ==="
+          Write-Host "=== TAKING SCREENSHOTS FOR 1 MINUTE ==="
           
           $startTime = Get-Date
           $count = 0
           
-          # Take screenshots for 60 seconds only
           while ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -lt 60) {
               $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss-fff"
               $filename = "$env:SCREENSHOT_DIR\ss_$($count.ToString('D3'))_$timestamp.png"
@@ -100,14 +125,13 @@ jobs:
               Start-Sleep -Seconds 5
           }
           
-          Write-Host "=== SCREENSHOT CAPTURE DONE - $count screenshots taken ==="
+          Write-Host "=== DONE - $count screenshots taken ==="
 
-      - name: Keep alive for 6 hours (doing nothing)
+      - name: Keep alive for 6 hours
         shell: powershell
         run: |
           Write-Host "=== KEEPING WORKFLOW ALIVE ==="
-          Write-Host "No more actions - just waiting"
-          Write-Host "Parsec and AHK are running in background"
+          Write-Host "Parsec and AHK running in background"
           Write-Host "==============================="
           
           $startTime = Get-Date
