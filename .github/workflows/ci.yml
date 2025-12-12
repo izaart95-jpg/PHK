@@ -6,7 +6,7 @@ on:
 jobs:
   parsec-ahk-automation:
     runs-on: windows-latest
-    timeout-minutes: 360  # 6 hours
+    timeout-minutes: 360
 
     steps:
       - name: Create working directory
@@ -26,13 +26,8 @@ jobs:
           $nircmdUrl = "https://www.nirsoft.net/utils/nircmd-x64.zip"
           $nircmdZip = "$env:WORK_DIR\nircmd.zip"
           $nircmdDir = "$env:WORK_DIR\nircmd"
-          
-          # Download NirCmd
           Invoke-WebRequest -Uri $nircmdUrl -OutFile $nircmdZip -UserAgent "Mozilla/5.0"
-          
-          # Extract NirCmd
           Expand-Archive -Path $nircmdZip -DestinationPath $nircmdDir -Force
-          
           $nircmdPath = "$nircmdDir\nircmd.exe"
           echo "NIRCMD_PATH=$nircmdPath" >> $env:GITHUB_ENV
           Write-Host "NirCmd installed at: $nircmdPath"
@@ -65,38 +60,7 @@ jobs:
           Start-Sleep -Seconds 20
           echo "Parsec installed"
 
-      - name: Create screenshot script
-        shell: powershell
-        run: |
-          $screenshotScript = @'
-          param(
-              [string]$NircmdPath,
-              [string]$ScreenshotDir,
-              [int]$IntervalSeconds = 30,
-              [int]$MaxScreenshots = 720  # 6 hours * 120 screenshots/hour
-          )
-          
-          $count = 0
-          while ($count -lt $MaxScreenshots) {
-              $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-              $filename = "$ScreenshotDir\screenshot_$($count.ToString('D4'))_$timestamp.png"
-              
-              # Take screenshot using NirCmd
-              & $NircmdPath savescreenshot $filename
-              
-              Write-Host "[$(Get-Date)] Screenshot saved: $filename"
-              $count++
-              
-              Start-Sleep -Seconds $IntervalSeconds
-          }
-          '@
-          
-          $scriptPath = "$env:WORK_DIR\take_screenshots.ps1"
-          $screenshotScript | Out-File -FilePath $scriptPath -Encoding UTF8
-          echo "SCREENSHOT_SCRIPT=$scriptPath" >> $env:GITHUB_ENV
-          Write-Host "Screenshot script created at: $scriptPath"
-
-      - name: Run AutoHotkey script and start screenshots
+      - name: Run AutoHotkey script
         shell: powershell
         run: |
           $ahkUX = "C:\Program Files\AutoHotkey\UX\AutoHotkeyUX.exe"
@@ -119,72 +83,63 @@ jobs:
               Write-Host "AutoHotkey NOT FOUND!"
           }
           
-          Write-Host "AutoHotkey script started"
-          
-          # Take initial screenshot immediately
-          $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-          $initialScreenshot = "$env:SCREENSHOT_DIR\screenshot_0000_INITIAL_$timestamp.png"
-          & $env:NIRCMD_PATH savescreenshot $initialScreenshot
-          Write-Host "Initial screenshot taken: $initialScreenshot"
-          
-          # Start screenshot process in background
-          $screenshotJob = Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -File `"$env:SCREENSHOT_SCRIPT`" -NircmdPath `"$env:NIRCMD_PATH`" -ScreenshotDir `"$env:SCREENSHOT_DIR`" -IntervalSeconds 30" -PassThru -WindowStyle Hidden
-          echo "SCREENSHOT_PID=$($screenshotJob.Id)" >> $env:GITHUB_ENV
-          Write-Host "Screenshot process started with PID: $($screenshotJob.Id)"
+          Write-Host "AutoHotkey script started at $(Get-Date)"
 
-      - name: Keep workflow running for 6 hours
+      - name: Wait 1 minute - DO NOTHING
         shell: powershell
         run: |
-          Write-Host "=== Parsec AutoHotkey Automation ==="
-          Write-Host "AutoHotkey script is running"
-          Write-Host "Screenshots being taken every 30 seconds"
-          Write-Host "Screenshots saved to: $env:SCREENSHOT_DIR"
-          Write-Host "Parsec should be installed and configured"
-          Write-Host "Workflow will run for 6 hours or until manually cancelled"
-          Write-Host "====================================="
+          Write-Host "=== WAITING 1 MINUTE - DOING NOTHING ==="
+          Write-Host "Started waiting at: $(Get-Date)"
+          Start-Sleep -Seconds 60
+          Write-Host "Finished waiting at: $(Get-Date)"
+          Write-Host "========================================="
+
+      - name: Take screenshots every 30 seconds for 6 hours
+        shell: powershell
+        run: |
+          Write-Host "=== STARTING SCREENSHOT CAPTURE ==="
+          Write-Host "Screenshots will be saved to: $env:SCREENSHOT_DIR"
+          Write-Host "Interval: 30 seconds"
+          Write-Host "===================================="
           
           $startTime = Get-Date
+          $count = 0
+          
           while ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalHours -lt 6) {
-              $elapsed = (New-TimeSpan -Start $startTime -End (Get-Date))
-              $screenshotCount = (Get-ChildItem -Path $env:SCREENSHOT_DIR -Filter "*.png" -ErrorAction SilentlyContinue | Measure-Object).Count
-              Write-Host "[$(Get-Date)] Running for $($elapsed.ToString('hh\:mm\:ss')) - Screenshots taken: $screenshotCount"
-              Start-Sleep -Seconds 300  # Status update every 5 minutes
+              $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+              $filename = "$env:SCREENSHOT_DIR\screenshot_$($count.ToString('D4'))_$timestamp.png"
+              
+              # Take screenshot
+              & $env:NIRCMD_PATH savescreenshot $filename
+              
+              Write-Host "[$(Get-Date)] Screenshot #$count saved: $filename"
+              $count++
+              
+              Start-Sleep -Seconds 30
           }
           
-          Write-Host "6-hour limit reached, workflow completed"
+          Write-Host "=== SCREENSHOT CAPTURE COMPLETE ==="
+          Write-Host "Total screenshots taken: $count"
 
-      - name: Stop screenshot process
+      - name: List screenshots
         if: always()
         shell: powershell
         run: |
-          # Stop the screenshot process if still running
-          if ($env:SCREENSHOT_PID) {
-              Stop-Process -Id $env:SCREENSHOT_PID -Force -ErrorAction SilentlyContinue
-              Write-Host "Screenshot process stopped"
-          }
-
-      - name: List files for debugging
-        if: always()
-        shell: powershell
-        run: |
-          Write-Host "Current directory: $(Get-Location)"
-          Write-Host ""
-          Write-Host "Contents of work directory:"
-          Get-ChildItem -Path $env:WORK_DIR -Recurse -ErrorAction SilentlyContinue | Format-Table Name, Length, LastWriteTime
-          Write-Host ""
-          Write-Host "Contents of screenshot directory:"
+          Write-Host "=== SCREENSHOT SUMMARY ==="
           $screenshots = Get-ChildItem -Path $env:SCREENSHOT_DIR -Filter "*.png" -ErrorAction SilentlyContinue
           Write-Host "Total screenshots: $($screenshots.Count)"
+          Write-Host ""
+          Write-Host "First 10 screenshots:"
           $screenshots | Select-Object -First 10 | Format-Table Name, Length, LastWriteTime
-          if ($screenshots.Count -gt 10) {
-              Write-Host "... and $($screenshots.Count - 10) more screenshots"
-          }
+          Write-Host ""
+          Write-Host "Last 10 screenshots:"
+          $screenshots | Select-Object -Last 10 | Format-Table Name, Length, LastWriteTime
 
-      - name: Upload screenshots as artifact
+      - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: parsec-screenshots-${{ github.run_id }}
+          name: screenshots-${{ github.run_id }}
           path: ${{ env.SCREENSHOT_DIR }}
           retention-days: 7
           if-no-files-found: warn
