@@ -11,13 +11,13 @@ jobs:
     steps:
       - name: Download and install AutoHotkey v2
         run: |
-          $ahkUrl = "https://www.mediafire.com/file/tob6736a61vcdph/AutoHotkey_2.0.19_setup.exe/file"
+          $ahkUrl = "https://download2271.mediafire.com/v710hl8dpvbgN7C7twH7BnUzad8XO6b1zUfAdEt2m6YlQlOHSAhh7tOb8H45vj4IIyTPNdunRge7bvkRzdsoeu9lmz95GSvO4XQcNcH1L4w49XXGOOtPB3_Zvwg6oI1SQdYvXpQXsI-77bs4dfSsqkZBvN5RSiKJ4qXpaYAoSrZoF7s/tob6736a61vcdph/AutoHotkey_2.0.19_setup.exe"
           $ahkPath = "$env:TEMP\ahk-v2.exe"
           Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkPath
           # Install AutoHotkey silently
           Start-Process -FilePath $ahkPath -ArgumentList "/silent" -Wait
           echo "AHK installed"
-
+      
       - name: Create AutoHotkey script
         run: |
           $scriptContent = @'
@@ -36,7 +36,7 @@ Send "{Enter}"
           Set-Content -Path $scriptPath -Value $scriptContent
           echo "SCRIPT_PATH=$scriptPath" >> $env:GITHUB_ENV
           echo "AHK script created at: $scriptPath"
-
+      
       - name: Download and install Parsec
         run: |
           $parsecUrl = "https://builds.parsec.app/package/parsec-windows.exe"
@@ -47,7 +47,7 @@ Send "{Enter}"
           echo "Parsec installed"
           # Wait for installation to complete
           Start-Sleep -Seconds 20
-
+      
       - name: Run AutoHotkey script
         run: |
           # Path to AutoHotkey executable
@@ -77,7 +77,7 @@ Send "{Enter}"
                   }
               }
           }
-
+      
       - name: Keep workflow running 6 hours
         run: |
           Write-Host "=== Parsec Auto Login Workflow ==="
@@ -100,7 +100,7 @@ Send "{Enter}"
           }
           
           Write-Host "6-hour limit reached, workflow completed"
-
+      
       - name: Cleanup (optional)
         if: always()
         run: |
