@@ -61,7 +61,13 @@ jobs:
           Send "Hamza@123456"
           Sleep 1000
           Send "{Enter}"
-          Sleep 30000
+          Sleep 5000
+          Send "{Enter}"
+          Sleep 5000
+          Send "{Enter}"
+          Sleep 5000
+          Send "{Enter}"
+          Sleep 5000
           Send "{Enter}"
           '@
           
