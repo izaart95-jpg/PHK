@@ -1,4 +1,4 @@
-name: Parsec AutoHotkey Automation
+name: PHK
 
 on:
   workflow_dispatch:
